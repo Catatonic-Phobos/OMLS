@@ -1,6 +1,6 @@
 # OMLS Plan — 0.1 → 0.3
 
-Status: **0.1–0.5 landed** (0.5 Behavior Profiles + telemetry persistence) · next: 0.6 adaptive scheduling beyond simple stats  
+Status: **0.1–0.5 on main** · hierarchy: [omls-layers.md](omls-layers.md) · next: 0.6 adaptive scheduling  
 Date: 2026-10-02
 
 ## Locked decisions

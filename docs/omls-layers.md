@@ -22,13 +22,11 @@ Policy: land each layer on `main` so the tree stays runnable; keep a PR (or comm
 
 | Layer | Role | Primary packages / surfaces |
 |---|---|---|
-| **0.1** | Discover hardware → describe | `internal/discover`, `internal/rdl`, `omls agent discover` |
-| **0.2** | Multi-node control plane | `internal/fabric` (register/heartbeat/graph), `internal/graph`, `proto/`, `omls master serve\|graph\|health`, `omls agent run` |
-| **0.3** | Schedule work + learn split | `internal/schedule`, `internal/learn`, `internal/work`, fabric `ClaimWork`/`ReportWork`/`RunDemo`, `omls master run-demo` |
-| **0.4** | Shape CPU intensity over time | `internal/envelope`, agent envelope apply, `envelope_yaml` on work units |
-| **0.5** | Persist observed behavior | `internal/behavior`, `ListProfiles`/`GetProfile`, master `--data-dir`, `omls master profiles` |
-
-Delivery notes for shipped layers: [`docs/layers/`](layers/).
+| **0.1** | Discover hardware → describe | `internal/discover`, `internal/rdl`, `omls agent discover` | [note](layers/0.1-discover.md) |
+| **0.2** | Multi-node control plane | `internal/fabric` (register/heartbeat/graph), `internal/graph`, `proto/`, `omls master serve\|graph\|health`, `omls agent run` | [note](layers/0.2-fabric.md) |
+| **0.3** | Schedule work + learn split | `internal/schedule`, `internal/learn`, `internal/work`, fabric `ClaimWork`/`ReportWork`/`RunDemo`, `omls master run-demo` | [note](layers/0.3-scheduler.md) |
+| **0.4** | Shape CPU intensity over time | `internal/envelope`, agent envelope apply, `envelope_yaml` on work units | [note](layers/0.4-envelopes.md) |
+| **0.5** | Persist observed behavior | `internal/behavior`, `ListProfiles`/`GetProfile`, master `--data-dir`, `omls master profiles` | [note](layers/0.5-behavior.md) |
 
 ---
 

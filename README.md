@@ -6,13 +6,15 @@ This repository is **independent** of other company stacks.
 
 ## Status
 
-| Version | Scope |
-|---|---|
-| **0.1** | `omls agent discover` → Machine Profile (RDL v0) |
-| **0.2** | Multi-node fabric (gRPC + mTLS) + in-memory Resource Graph |
-| **0.3** | Resource Graph scheduler + EWMA learning demo (`run-demo`) |
-| **0.4** | Resource Envelopes (attack/peak/sustain/release) |
-| **0.5** (this tree) | Behavior Profiles + telemetry persistence |
+`main` is always the **cumulative functional stack**. Versions are additive **layers** — see [`docs/omls-layers.md`](docs/omls-layers.md).
+
+| Version | Scope | Layer note |
+|---|---|---|
+| **0.1** | `omls agent discover` → Machine Profile (RDL v0) | base |
+| **0.2** | Multi-node fabric (gRPC + mTLS) + in-memory Resource Graph | |
+| **0.3** | Resource Graph scheduler + EWMA learning demo (`run-demo`) | [delivery](docs/layers/0.3-scheduler.md) |
+| **0.4** | Resource Envelopes (attack/peak/sustain/release) | [delivery](docs/layers/0.4-envelopes.md) |
+| **0.5** (this tree) | Behavior Profiles + telemetry persistence | [delivery](docs/layers/0.5-behavior.md) |
 
 No kernel fork. No Popcorn. Userspace on stock Linux only.
 

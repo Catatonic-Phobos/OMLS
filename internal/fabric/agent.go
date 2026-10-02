@@ -8,28 +8,34 @@ import (
 	"github.com/Catatonic-Phobos/OMLS/internal/discover"
 	"github.com/Catatonic-Phobos/OMLS/internal/rdl"
 	"github.com/Catatonic-Phobos/OMLS/internal/telemetry"
+	"github.com/Catatonic-Phobos/OMLS/internal/work"
 	omlsv1 "github.com/Catatonic-Phobos/OMLS/proto/omls/v1"
 	"google.golang.org/grpc"
 )
 
-// AgentConfig drives Register → Advertise → Heartbeat loops.
+// AgentConfig drives Register → Advertise → Heartbeat (+ work claim) loops.
 type AgentConfig struct {
 	MasterAddr   string
 	Client       omlsv1.FabricClient
 	Conn         *grpc.ClientConn // closed by Run when set
 	Interval     time.Duration
+	WorkPoll     time.Duration
 	SysRoot      string
 	AgentVersion string
 	Once         bool // register+advertise+one heartbeat then exit
 }
 
 // Run discovers the local node, registers with the master, and heartbeats.
+// While running it also claims and executes demo work units.
 func Run(ctx context.Context, cfg AgentConfig) error {
 	if cfg.Client == nil {
 		return fmt.Errorf("fabric client is required")
 	}
 	if cfg.Interval <= 0 {
 		cfg.Interval = 5 * time.Second
+	}
+	if cfg.WorkPoll <= 0 {
+		cfg.WorkPoll = 200 * time.Millisecond
 	}
 	if cfg.AgentVersion == "" {
 		cfg.AgentVersion = Version
@@ -43,9 +49,10 @@ func Run(ctx context.Context, cfg AgentConfig) error {
 		return fmt.Errorf("discover: %w", err)
 	}
 	doc := res.Document
+	nodeID := doc.Node.ID
 
 	reg, err := cfg.Client.Register(ctx, &omlsv1.RegisterRequest{
-		NodeId:       doc.Node.ID,
+		NodeId:       nodeID,
 		Hostname:     doc.Node.Hostname,
 		Virt:         doc.Node.Virt,
 		AgentVersion: cfg.AgentVersion,
@@ -58,14 +65,14 @@ func Run(ctx context.Context, cfg AgentConfig) error {
 		cfg.Interval = time.Duration(ms) * time.Millisecond
 	}
 
-	if err := advertise(ctx, cfg.Client, doc.Node.ID, session, &doc); err != nil {
+	if err := advertise(ctx, cfg.Client, nodeID, session, &doc); err != nil {
 		return err
 	}
 
 	sendHeartbeat := func() error {
 		tel := telemetry.Sample(cfg.SysRoot)
 		hb, err := cfg.Client.Heartbeat(ctx, &omlsv1.HeartbeatRequest{
-			NodeId:    doc.Node.ID,
+			NodeId:    nodeID,
 			SessionId: session,
 			Telemetry: &omlsv1.TelemetrySnapshot{
 				CpuLoad:           tel.CPULoad,
@@ -85,7 +92,8 @@ func Run(ctx context.Context, cfg AgentConfig) error {
 				return fmt.Errorf("re-discover: %w", derr)
 			}
 			doc = fresh.Document
-			if err := advertise(ctx, cfg.Client, doc.Node.ID, session, &doc); err != nil {
+			nodeID = doc.Node.ID
+			if err := advertise(ctx, cfg.Client, nodeID, session, &doc); err != nil {
 				return err
 			}
 		}
@@ -99,17 +107,62 @@ func Run(ctx context.Context, cfg AgentConfig) error {
 		return nil
 	}
 
-	ticker := time.NewTicker(cfg.Interval)
-	defer ticker.Stop()
+	hbTicker := time.NewTicker(cfg.Interval)
+	defer hbTicker.Stop()
+	workTicker := time.NewTicker(cfg.WorkPoll)
+	defer workTicker.Stop()
+
 	for {
 		select {
 		case <-ctx.Done():
 			return nil
-		case <-ticker.C:
+		case <-hbTicker.C:
 			if err := sendHeartbeat(); err != nil {
 				return err
 			}
+		case <-workTicker.C:
+			if err := claimAndRun(ctx, cfg, nodeID, session); err != nil {
+				return err
+			}
 		}
+	}
+}
+
+func claimAndRun(ctx context.Context, cfg AgentConfig, nodeID, session string) error {
+	for {
+		claim, err := cfg.Client.ClaimWork(ctx, &omlsv1.ClaimWorkRequest{
+			NodeId:    nodeID,
+			SessionId: session,
+		})
+		if err != nil {
+			return fmt.Errorf("claim work: %w", err)
+		}
+		if !claim.GetHasWork() || claim.GetUnit() == nil {
+			return nil
+		}
+		unit := claim.GetUnit()
+		before := telemetry.Sample(cfg.SysRoot)
+		dur, burnErr := work.Burn(ctx, unit.GetIterations())
+		after := telemetry.Sample(cfg.SysRoot)
+		tempKnown := before.TemperatureKnown && after.TemperatureKnown
+		errText := ""
+		if burnErr != nil && ctx.Err() == nil {
+			errText = burnErr.Error()
+		}
+		_, err = cfg.Client.ReportWork(ctx, &omlsv1.ReportWorkRequest{
+			NodeId:           nodeID,
+			SessionId:        session,
+			WorkId:           unit.GetWorkId(),
+			DurationMs:       dur.Milliseconds(),
+			TempBeforeC:      before.TemperatureC,
+			TempAfterC:       after.TemperatureC,
+			TemperatureKnown: tempKnown,
+			Error:            errText,
+		})
+		if err != nil {
+			return fmt.Errorf("report work: %w", err)
+		}
+		// Keep draining the queue while the demo is active.
 	}
 }
 

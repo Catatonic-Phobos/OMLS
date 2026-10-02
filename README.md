@@ -9,8 +9,8 @@ This repository is **independent** of other company stacks.
 | Version | Scope |
 |---|---|
 | **0.1** | `omls agent discover` → Machine Profile (RDL v0) |
-| **0.2** (this tree) | Multi-node fabric (gRPC + mTLS) + in-memory Resource Graph |
-| 0.3 | Resource Graph scheduler + first statistical learning loop — not started |
+| **0.2** | Multi-node fabric (gRPC + mTLS) + in-memory Resource Graph |
+| **0.3** (this tree) | Resource Graph scheduler + EWMA learning demo (`run-demo`) |
 
 No kernel fork. No Popcorn. Userspace on stock Linux only.
 
@@ -100,6 +100,23 @@ omls agent run      ← discover + register + heartbeat
 `--insecure` disables TLS entirely. Lab / localhost only.
 
 Heartbeat silence beyond `--heartbeat-timeout` (default 15s) marks the node **unavailable** in the graph; the profile is retained.
+
+## Scheduler demo (0.3)
+
+With a master and one or more `omls agent run` processes:
+
+```bash
+# terminal 1
+./omls master serve --listen 127.0.0.1:7443 --insecure
+
+# terminal 2 (+ optional more nodes)
+./omls agent run --master 127.0.0.1:7443 --insecure
+
+# terminal 3
+./omls master run-demo --master 127.0.0.1:7443 --insecure --workers 8 --iterations 3
+```
+
+The demo schedules `parallel_workers` across available compute nodes, agents burn CPU for each work unit, and the Learning Plane (EWMA of duration / temp delta) adjusts the next split with printed reasons. Missing thermal signals stay neutral. Rebalancing needs ≥2 available nodes.
 
 ## Root vs non-root
 

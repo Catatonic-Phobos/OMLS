@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"net"
+	"os"
 	"time"
 
 	"github.com/Catatonic-Phobos/OMLS/internal/graph"
@@ -20,7 +21,7 @@ import (
 	"google.golang.org/grpc/status"
 )
 
-const Version = "0.2.0"
+const Version = "0.3.0"
 
 // Server hosts the Fabric API against an in-memory Resource Graph.
 type Server struct {
@@ -28,6 +29,8 @@ type Server struct {
 	reg            *graph.Registry
 	heartbeatEvery time.Duration
 	version        string
+	demo           *demoState
+	localHostname  string
 }
 
 // NewServer wraps a registry.
@@ -35,7 +38,14 @@ func NewServer(reg *graph.Registry, heartbeatEvery time.Duration) *Server {
 	if heartbeatEvery <= 0 {
 		heartbeatEvery = 5 * time.Second
 	}
-	return &Server{reg: reg, heartbeatEvery: heartbeatEvery, version: Version}
+	host, _ := os.Hostname()
+	return &Server{
+		reg:            reg,
+		heartbeatEvery: heartbeatEvery,
+		version:        Version,
+		demo:           newDemoState(),
+		localHostname:  host,
+	}
 }
 
 // Registry exposes the backing graph (for tests / local dumps).

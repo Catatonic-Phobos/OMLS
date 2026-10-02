@@ -1,6 +1,6 @@
 # OMLS Plan — 0.1 → 0.3
 
-Status: **0.1 landed on main** · **0.2 fabric in tree** · 0.3 not started  
+Status: **0.1–0.3 landed on main** · next: 0.4 Resource Envelopes  
 Date: 2026-10-02
 
 ## Locked decisions

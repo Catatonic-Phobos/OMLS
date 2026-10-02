@@ -20,7 +20,7 @@ import (
 	"google.golang.org/grpc/credentials"
 )
 
-const version = "0.2.0"
+const version = "0.3.0"
 
 func main() {
 	if len(os.Args) < 2 {
@@ -78,6 +78,8 @@ func runMaster(args []string) error {
 		return runMasterGraph(args[1:])
 	case "health":
 		return runMasterHealth(args[1:])
+	case "run-demo":
+		return runMasterDemo(args[1:])
 	case "help", "-h", "--help":
 		fmt.Print(masterUsage())
 		return nil
@@ -418,6 +420,149 @@ func runMasterGraph(args []string) error {
 	return nil
 }
 
+func runMasterDemo(args []string) error {
+	tlsF, rest, err := parseTLSFlags(args)
+	if err != nil {
+		return err
+	}
+	master := "127.0.0.1:7443"
+	workers := int32(8)
+	iterations := int32(3)
+	workIters := int64(3_000_000)
+	for i := 0; i < len(rest); i++ {
+		a := rest[i]
+		switch {
+		case a == "--master":
+			i++
+			if i >= len(rest) {
+				return fmt.Errorf("--master requires host:port")
+			}
+			master = rest[i]
+		case strings.HasPrefix(a, "--master="):
+			master = strings.TrimPrefix(a, "--master=")
+		case a == "--workers":
+			i++
+			if i >= len(rest) {
+				return fmt.Errorf("--workers requires an int")
+			}
+			var n int
+			n, err = parseInt(rest[i])
+			if err != nil {
+				return err
+			}
+			workers = int32(n)
+		case strings.HasPrefix(a, "--workers="):
+			var n int
+			n, err = parseInt(strings.TrimPrefix(a, "--workers="))
+			if err != nil {
+				return err
+			}
+			workers = int32(n)
+		case a == "--iterations":
+			i++
+			if i >= len(rest) {
+				return fmt.Errorf("--iterations requires an int")
+			}
+			var n int
+			n, err = parseInt(rest[i])
+			if err != nil {
+				return err
+			}
+			iterations = int32(n)
+		case strings.HasPrefix(a, "--iterations="):
+			var n int
+			n, err = parseInt(strings.TrimPrefix(a, "--iterations="))
+			if err != nil {
+				return err
+			}
+			iterations = int32(n)
+		case a == "--work-iterations":
+			i++
+			if i >= len(rest) {
+				return fmt.Errorf("--work-iterations requires an int")
+			}
+			workIters, err = parseInt64(rest[i])
+			if err != nil {
+				return err
+			}
+		case strings.HasPrefix(a, "--work-iterations="):
+			workIters, err = parseInt64(strings.TrimPrefix(a, "--work-iterations="))
+			if err != nil {
+				return err
+			}
+		case a == "-h" || a == "--help":
+			fmt.Print(masterDemoUsage())
+			return nil
+		default:
+			return fmt.Errorf("unknown flag %q", a)
+		}
+	}
+	creds, err := tlsF.clientCreds()
+	if err != nil {
+		return err
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Minute)
+	defer cancel()
+	conn, client, err := fabric.Dial(ctx, fabric.DialOptions{Addr: master, TLS: creds, Timeout: 5 * time.Second})
+	if err != nil {
+		return err
+	}
+	defer conn.Close()
+
+	fmt.Fprintf(os.Stderr, "omls master run-demo: workers=%d iterations=%d work_iterations=%d\n",
+		workers, iterations, workIters)
+	resp, err := client.RunDemo(ctx, &omlsv1.RunDemoRequest{
+		Workers:        workers,
+		Iterations:     iterations,
+		WorkIterations: workIters,
+		TimeoutMs:      180_000,
+	})
+	if err != nil {
+		return err
+	}
+	for _, r := range resp.GetRounds() {
+		fmt.Printf("\n=== round %d (%d ms) ===\n", r.GetRound(), r.GetWallMs())
+		fmt.Printf("policy: %s\n", r.GetPolicyNote())
+		for _, a := range r.GetAllocations() {
+			fmt.Printf("  %-12s workers=%d score=%.1f virt=%s host=%s\n",
+				short(a.GetNodeId()), a.GetWorkers(), a.GetScore(), a.GetVirt(), a.GetHostname())
+			if a.GetReason() != "" {
+				fmt.Printf("             reason: %s\n", a.GetReason())
+			}
+		}
+		if len(r.GetDurationEwmaMs()) > 0 {
+			fmt.Printf("  duration_ewma_ms: %v\n", r.GetDurationEwmaMs())
+		}
+	}
+	fmt.Printf("\nsummary: %s\n", resp.GetSummary())
+	return nil
+}
+
+func parseInt(s string) (int, error) {
+	var n int
+	_, err := fmt.Sscanf(s, "%d", &n)
+	if err != nil {
+		return 0, fmt.Errorf("invalid int %q", s)
+	}
+	return n, nil
+}
+
+func parseInt64(s string) (int64, error) {
+	var n int64
+	_, err := fmt.Sscanf(s, "%d", &n)
+	if err != nil {
+		return 0, fmt.Errorf("invalid int %q", s)
+	}
+	return n, nil
+}
+
+func short(id string) string {
+	if len(id) <= 8 {
+		return id
+	}
+	return id[:8]
+}
+
 func runMasterHealth(args []string) error {
 	tlsF, rest, err := parseTLSFlags(args)
 	if err != nil {
@@ -472,9 +617,10 @@ Usage:
   omls master serve [--listen :7443] [--ca --cert --key | --insecure]
   omls master graph --master HOST:PORT --out graph.yaml
   omls master health --master HOST:PORT
+  omls master run-demo --master HOST:PORT [--workers 8] [--iterations 3]
   omls version
 
-OMLS 0.2: local discovery + multi-node fabric (gRPC, mTLS).
+OMLS 0.3: discovery + fabric + Resource Graph scheduler + EWMA learning demo.
 `)
 }
 
@@ -528,6 +674,18 @@ Usage:
   omls master serve [flags]
   omls master graph [flags]
   omls master health [flags]
+  omls master run-demo [flags]
+`
+}
+
+func masterDemoUsage() string {
+	return `omls master run-demo — schedule parallel_workers and learn with EWMA
+
+Usage:
+  omls master run-demo --master HOST:PORT [--workers 8] [--iterations 3] [--work-iterations N] (--ca --cert --key | --insecure)
+
+Agents must be running (` + "`omls agent run`" + `) so they can claim and execute work units.
+With one node the demo still runs; rebalancing needs ≥2 available nodes.
 `
 }
 

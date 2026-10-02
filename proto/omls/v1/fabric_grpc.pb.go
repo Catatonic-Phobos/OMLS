@@ -25,13 +25,16 @@ const (
 	Fabric_StreamTelemetry_FullMethodName  = "/omls.v1.Fabric/StreamTelemetry"
 	Fabric_Health_FullMethodName           = "/omls.v1.Fabric/Health"
 	Fabric_GetGraph_FullMethodName         = "/omls.v1.Fabric/GetGraph"
+	Fabric_ClaimWork_FullMethodName        = "/omls.v1.Fabric/ClaimWork"
+	Fabric_ReportWork_FullMethodName       = "/omls.v1.Fabric/ReportWork"
+	Fabric_RunDemo_FullMethodName          = "/omls.v1.Fabric/RunDemo"
 )
 
 // FabricClient is the client API for Fabric service.
 //
 // For semantics around ctx use and closing/ending streaming RPCs, please refer to https://pkg.go.dev/google.golang.org/grpc/?tab=doc#ClientConn.NewStream.
 //
-// Fabric is the OMLS 0.2 control-plane API between agents and master.
+// Fabric is the OMLS control-plane API between agents, master, and operators.
 type FabricClient interface {
 	// Register joins a node into the Resource Graph.
 	Register(ctx context.Context, in *RegisterRequest, opts ...grpc.CallOption) (*RegisterResponse, error)
@@ -45,6 +48,12 @@ type FabricClient interface {
 	Health(ctx context.Context, in *HealthRequest, opts ...grpc.CallOption) (*HealthResponse, error)
 	// GetGraph dumps the current in-memory Resource Graph.
 	GetGraph(ctx context.Context, in *GetGraphRequest, opts ...grpc.CallOption) (*GetGraphResponse, error)
+	// ClaimWork lets an agent pull one work unit (empty if none).
+	ClaimWork(ctx context.Context, in *ClaimWorkRequest, opts ...grpc.CallOption) (*ClaimWorkResponse, error)
+	// ReportWork returns the result of a claimed work unit.
+	ReportWork(ctx context.Context, in *ReportWorkRequest, opts ...grpc.CallOption) (*ReportWorkResponse, error)
+	// RunDemo runs the 0.3 parallel_workers learning demo on the master.
+	RunDemo(ctx context.Context, in *RunDemoRequest, opts ...grpc.CallOption) (*RunDemoResponse, error)
 }
 
 type fabricClient struct {
@@ -118,11 +127,41 @@ func (c *fabricClient) GetGraph(ctx context.Context, in *GetGraphRequest, opts .
 	return out, nil
 }
 
+func (c *fabricClient) ClaimWork(ctx context.Context, in *ClaimWorkRequest, opts ...grpc.CallOption) (*ClaimWorkResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(ClaimWorkResponse)
+	err := c.cc.Invoke(ctx, Fabric_ClaimWork_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *fabricClient) ReportWork(ctx context.Context, in *ReportWorkRequest, opts ...grpc.CallOption) (*ReportWorkResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(ReportWorkResponse)
+	err := c.cc.Invoke(ctx, Fabric_ReportWork_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *fabricClient) RunDemo(ctx context.Context, in *RunDemoRequest, opts ...grpc.CallOption) (*RunDemoResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(RunDemoResponse)
+	err := c.cc.Invoke(ctx, Fabric_RunDemo_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // FabricServer is the server API for Fabric service.
 // All implementations must embed UnimplementedFabricServer
 // for forward compatibility.
 //
-// Fabric is the OMLS 0.2 control-plane API between agents and master.
+// Fabric is the OMLS control-plane API between agents, master, and operators.
 type FabricServer interface {
 	// Register joins a node into the Resource Graph.
 	Register(context.Context, *RegisterRequest) (*RegisterResponse, error)
@@ -136,6 +175,12 @@ type FabricServer interface {
 	Health(context.Context, *HealthRequest) (*HealthResponse, error)
 	// GetGraph dumps the current in-memory Resource Graph.
 	GetGraph(context.Context, *GetGraphRequest) (*GetGraphResponse, error)
+	// ClaimWork lets an agent pull one work unit (empty if none).
+	ClaimWork(context.Context, *ClaimWorkRequest) (*ClaimWorkResponse, error)
+	// ReportWork returns the result of a claimed work unit.
+	ReportWork(context.Context, *ReportWorkRequest) (*ReportWorkResponse, error)
+	// RunDemo runs the 0.3 parallel_workers learning demo on the master.
+	RunDemo(context.Context, *RunDemoRequest) (*RunDemoResponse, error)
 	mustEmbedUnimplementedFabricServer()
 }
 
@@ -163,6 +208,15 @@ func (UnimplementedFabricServer) Health(context.Context, *HealthRequest) (*Healt
 }
 func (UnimplementedFabricServer) GetGraph(context.Context, *GetGraphRequest) (*GetGraphResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method GetGraph not implemented")
+}
+func (UnimplementedFabricServer) ClaimWork(context.Context, *ClaimWorkRequest) (*ClaimWorkResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method ClaimWork not implemented")
+}
+func (UnimplementedFabricServer) ReportWork(context.Context, *ReportWorkRequest) (*ReportWorkResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method ReportWork not implemented")
+}
+func (UnimplementedFabricServer) RunDemo(context.Context, *RunDemoRequest) (*RunDemoResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method RunDemo not implemented")
 }
 func (UnimplementedFabricServer) mustEmbedUnimplementedFabricServer() {}
 func (UnimplementedFabricServer) testEmbeddedByValue()                {}
@@ -282,6 +336,60 @@ func _Fabric_GetGraph_Handler(srv interface{}, ctx context.Context, dec func(int
 	return interceptor(ctx, in, info, handler)
 }
 
+func _Fabric_ClaimWork_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ClaimWorkRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(FabricServer).ClaimWork(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Fabric_ClaimWork_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(FabricServer).ClaimWork(ctx, req.(*ClaimWorkRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _Fabric_ReportWork_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ReportWorkRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(FabricServer).ReportWork(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Fabric_ReportWork_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(FabricServer).ReportWork(ctx, req.(*ReportWorkRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _Fabric_RunDemo_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(RunDemoRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(FabricServer).RunDemo(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Fabric_RunDemo_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(FabricServer).RunDemo(ctx, req.(*RunDemoRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // Fabric_ServiceDesc is the grpc.ServiceDesc for Fabric service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -308,6 +416,18 @@ var Fabric_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "GetGraph",
 			Handler:    _Fabric_GetGraph_Handler,
+		},
+		{
+			MethodName: "ClaimWork",
+			Handler:    _Fabric_ClaimWork_Handler,
+		},
+		{
+			MethodName: "ReportWork",
+			Handler:    _Fabric_ReportWork_Handler,
+		},
+		{
+			MethodName: "RunDemo",
+			Handler:    _Fabric_RunDemo_Handler,
 		},
 	},
 	Streams: []grpc.StreamDesc{

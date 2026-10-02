@@ -4,7 +4,7 @@ package omls.v1;
 
 option go_package = "github.com/Catatonic-Phobos/OMLS/proto/omls/v1;omlsv1";
 
-// Fabric is the OMLS 0.2 control-plane API between agents and master.
+// Fabric is the OMLS control-plane API between agents, master, and operators.
 service Fabric {
   // Register joins a node into the Resource Graph.
   rpc Register(RegisterRequest) returns (RegisterResponse);
@@ -23,6 +23,15 @@ service Fabric {
 
   // GetGraph dumps the current in-memory Resource Graph.
   rpc GetGraph(GetGraphRequest) returns (GetGraphResponse);
+
+  // ClaimWork lets an agent pull one work unit (empty if none).
+  rpc ClaimWork(ClaimWorkRequest) returns (ClaimWorkResponse);
+
+  // ReportWork returns the result of a claimed work unit.
+  rpc ReportWork(ReportWorkRequest) returns (ReportWorkResponse);
+
+  // RunDemo runs the 0.3 parallel_workers learning demo on the master.
+  rpc RunDemo(RunDemoRequest) returns (RunDemoResponse);
 }
 
 message RegisterRequest {
@@ -94,4 +103,68 @@ message GetGraphRequest {}
 message GetGraphResponse {
   // Resource Graph dump as YAML.
   bytes graph_yaml = 1;
+}
+
+message ClaimWorkRequest {
+  string node_id = 1;
+  string session_id = 2;
+}
+
+message WorkUnit {
+  string work_id = 1;
+  string function = 2;     // "parallel_workers"
+  int64 iterations = 3;    // synthetic CPU burn size
+  int32 worker_index = 4;
+  int32 worker_count = 5;  // total workers in this demo iteration
+}
+
+message ClaimWorkResponse {
+  bool has_work = 1;
+  WorkUnit unit = 2;
+}
+
+message ReportWorkRequest {
+  string node_id = 1;
+  string session_id = 2;
+  string work_id = 3;
+  int64 duration_ms = 4;
+  double temp_before_c = 5;
+  double temp_after_c = 6;
+  bool temperature_known = 7;
+  string error = 8;
+}
+
+message ReportWorkResponse {
+  bool ok = 1;
+}
+
+message RunDemoRequest {
+  int32 workers = 1;          // total parallel workers
+  int32 iterations = 2;       // learning rounds
+  int64 work_iterations = 3;  // CPU burn per worker unit
+  double thermal_ceiling_c = 4; // 0 = default
+  int64 timeout_ms = 5;       // overall deadline
+}
+
+message NodeAllocation {
+  string node_id = 1;
+  string hostname = 2;
+  string virt = 3;
+  int32 workers = 4;
+  double score = 5;
+  string reason = 6;
+}
+
+message DemoRound {
+  int32 round = 1;
+  repeated NodeAllocation allocations = 2;
+  map<string, double> duration_ewma_ms = 3;
+  map<string, double> temp_delta_ewma = 4;
+  string policy_note = 5;
+  int64 wall_ms = 6;
+}
+
+message RunDemoResponse {
+  repeated DemoRound rounds = 1;
+  string summary = 2;
 }

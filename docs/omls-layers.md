@@ -3,6 +3,8 @@
 `main` is always the **cumulative functional stack**. Each version below is a **layer**: additive capability with a clear ownership boundary. Layers can be revisited or swapped later without rewriting the whole system.
 
 ```text
+0.8 Driver sandbox / VFIO-UIO stub
+  ↑
 0.7 Community hardware profiles
   ↑
 0.6 Adaptive scheduling (multi-signal + hysteresis)
@@ -33,6 +35,7 @@ Policy: land each layer on `main` so the tree stays runnable; keep a PR (or comm
 | **0.5** | Persist observed behavior | `internal/behavior`, `ListProfiles`/`GetProfile`, master `--data-dir`, `omls master profiles` | [note](layers/0.5-behavior.md) |
 | **0.6** | Adaptive multi-signal policy | `internal/learn` adaptive blend + hysteresis, `RunDemoRequest.policy`, `--policy adaptive` | [note](layers/0.6-adaptive.md) |
 | **0.7** | Community hardware priors | `internal/community`, `examples/community/`, `omls community`, master `--community-dir` | [note](layers/0.7-community.md) |
+| **0.8** | Driver sandbox stub | `internal/sandbox`, RDL `sandbox` class, `omls agent sandbox probe\|list\|claim` | [note](layers/0.8-sandbox.md) |
 
 ---
 
@@ -44,3 +47,4 @@ Policy: land each layer on `main` so the tree stays runnable; keep a PR (or comm
 4. Envelopes (0.4) are optional annotations on work; scheduler/learn (0.3/0.6) still decide *where* work goes.
 5. Adaptive policy (0.6) may use envelope intensity as a soft cost hint; it does not replace envelope apply on the agent.
 6. Community profiles (0.7) are soft priors only — local Behavior observations always win.
+7. Sandbox (0.8) never loads kernel modules or binds devices; missing VFIO/UIO is a warning, not a failure.

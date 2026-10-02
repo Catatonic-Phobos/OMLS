@@ -16,7 +16,8 @@ This repository is **independent** of other company stacks.
 | **0.4** | Resource Envelopes (attack/peak/sustain/release) | [delivery](docs/layers/0.4-envelopes.md) |
 | **0.5** | Behavior Profiles + telemetry persistence | [delivery](docs/layers/0.5-behavior.md) |
 | **0.6** | Adaptive multi-signal scheduling + hysteresis | [delivery](docs/layers/0.6-adaptive.md) |
-| **0.7** (this tree) | Community hardware profiles + priors | [delivery](docs/layers/0.7-community.md) |
+| **0.7** | Community hardware profiles + priors | [delivery](docs/layers/0.7-community.md) |
+| **0.8** (this tree) | Driver sandbox / VFIO-UIO userspace stub | [delivery](docs/layers/0.8-sandbox.md) |
 
 No kernel fork. No Popcorn. Userspace on stock Linux only.
 
@@ -197,6 +198,19 @@ Shared YAML snippets under `examples/community/` (or `community/` / `profiles/`)
 
 When an agent advertises its Machine Profile, the master best-effort matches arch/virt/model and seeds the Behavior store **only if** that node has no local observations yet.
 
+## Driver sandbox (0.8)
+
+Probe for VFIO/UIO and simulate sandbox claims (never binds real drivers):
+
+```bash
+./omls agent sandbox probe
+./omls agent sandbox list
+./omls agent sandbox claim sandbox0   # only if a backend was detected
+./omls agent discover --sandbox --out machine-profile.yaml
+```
+
+Typical cloud VMs print `backend=none` with a warning — that is expected and non-fatal.
+
 ## Root vs non-root
 
 Most of 0.1/0.2 works as a normal user:
@@ -212,7 +226,7 @@ See [`schemas/rdl-v0.schema.json`](schemas/rdl-v0.schema.json) and [`docs/omls-p
 
 ## Docs
 
-- [`docs/omls-layers.md`](docs/omls-layers.md) — operational layer hierarchy (0.1→0.7)
+- [`docs/omls-layers.md`](docs/omls-layers.md) — operational layer hierarchy (0.1→0.8)
 - [`docs/layers/`](docs/layers/) — per-layer delivery notes
 - [`docs/omls-vision.md`](docs/omls-vision.md) — full architecture vision
 - [`docs/omls-plan-0.1-0.3.md`](docs/omls-plan-0.1-0.3.md) — implementation plan for 0.1–0.3

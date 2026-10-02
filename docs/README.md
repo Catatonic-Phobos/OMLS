@@ -1,6 +1,6 @@
 # OMLS documentation
 
-- [Layers](./omls-layers.md) — operational hierarchy (0.1→0.7); `main` = cumulative stack
+- [Layers](./omls-layers.md) — operational hierarchy (0.1→0.8); `main` = cumulative stack
 - [Layer delivery notes](./layers/) — what each version owns in code
 - [Vision](./omls-vision.md) — full architecture vision
 - [Plan 0.1→0.3](./omls-plan-0.1-0.3.md) — implementation plan

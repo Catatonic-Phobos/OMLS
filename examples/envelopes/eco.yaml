@@ -1,0 +1,16 @@
+name: eco
+performance: eco
+attack:
+  level: 0.40
+  duration: 300ms
+peak:
+  level: 0.50
+  duration: 200ms
+sustain:
+  level: 0.35
+  duration: 0s
+release:
+  mode: gradual
+  duration: 400ms
+limits:
+  thermal_max_c: 75

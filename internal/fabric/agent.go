@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/Catatonic-Phobos/OMLS/internal/discover"
+	"github.com/Catatonic-Phobos/OMLS/internal/envelope"
 	"github.com/Catatonic-Phobos/OMLS/internal/rdl"
 	"github.com/Catatonic-Phobos/OMLS/internal/telemetry"
 	"github.com/Catatonic-Phobos/OMLS/internal/work"
@@ -142,12 +143,20 @@ func claimAndRun(ctx context.Context, cfg AgentConfig, nodeID, session string) e
 		}
 		unit := claim.GetUnit()
 		before := telemetry.Sample(cfg.SysRoot)
-		dur, burnErr := work.Burn(ctx, unit.GetIterations())
+		pacer, stopEnv, envWarns := startEnvelope(ctx, unit.GetEnvelopeYaml(), cfg.SysRoot)
+		dur, burnErr := work.Burn(ctx, unit.GetIterations(), pacer)
+		if stopEnv != nil {
+			stopEnv()
+		}
 		after := telemetry.Sample(cfg.SysRoot)
 		tempKnown := before.TemperatureKnown && after.TemperatureKnown
 		errText := ""
 		if burnErr != nil && ctx.Err() == nil {
 			errText = burnErr.Error()
+		}
+		if len(envWarns) > 0 && errText == "" {
+			// Keep result successful; envelope warnings are non-fatal.
+			_ = envWarns
 		}
 		_, err = cfg.Client.ReportWork(ctx, &omlsv1.ReportWorkRequest{
 			NodeId:           nodeID,
@@ -164,6 +173,44 @@ func claimAndRun(ctx context.Context, cfg AgentConfig, nodeID, session string) e
 		}
 		// Keep draining the queue while the demo is active.
 	}
+}
+
+func startEnvelope(ctx context.Context, raw []byte, sysRoot string) (work.Pacer, func(), []string) {
+	var env envelope.Envelope
+	var err error
+	if len(raw) == 0 {
+		env = envelope.Default()
+	} else {
+		env, err = envelope.ParseYAML(raw)
+		if err != nil {
+			env = envelope.Default()
+		}
+	}
+	backends, warns := envelope.OpenBackends()
+	if err != nil {
+		warns = append(warns, "envelope yaml: "+err.Error()+"; using balanced")
+	}
+	ctrl := &envelope.Controller{
+		Env:      env,
+		Backends: backends,
+		TempFn: func() (float64, bool) {
+			tel := telemetry.Sample(sysRoot)
+			return tel.TemperatureC, tel.TemperatureKnown
+		},
+	}
+	if _, err := ctrl.Start(ctx); err != nil {
+		warns = append(warns, "envelope start: "+err.Error())
+		return nil, nil, warns
+	}
+	var pacer work.Pacer
+	for _, b := range backends {
+		if d, ok := b.(*envelope.DutyCycle); ok {
+			pacer = d
+			break
+		}
+	}
+	stop := func() { _, _ = ctrl.Stop() }
+	return pacer, stop, warns
 }
 
 func advertise(ctx context.Context, client omlsv1.FabricClient, nodeID, session string, doc *rdl.Document) error {

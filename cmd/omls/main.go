@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/Catatonic-Phobos/OMLS/internal/discover"
+	"github.com/Catatonic-Phobos/OMLS/internal/envelope"
 	"github.com/Catatonic-Phobos/OMLS/internal/fabric"
 	"github.com/Catatonic-Phobos/OMLS/internal/fabric/tlsconfig"
 	"github.com/Catatonic-Phobos/OMLS/internal/graph"
@@ -20,7 +21,7 @@ import (
 	"google.golang.org/grpc/credentials"
 )
 
-const version = "0.3.0"
+const version = "0.4.0"
 
 func main() {
 	if len(os.Args) < 2 {
@@ -50,7 +51,7 @@ func main() {
 
 func runAgent(args []string) error {
 	if len(args) < 1 {
-		return fmt.Errorf("expected subcommand (discover|run|register)")
+		return fmt.Errorf("expected subcommand (discover|run|register|envelope)")
 	}
 	switch args[0] {
 	case "discover":
@@ -59,6 +60,8 @@ func runAgent(args []string) error {
 		return runAgentLoop(args[1:], false)
 	case "register":
 		return runAgentLoop(args[1:], true)
+	case "envelope":
+		return runEnvelope(args[1:])
 	case "help", "-h", "--help":
 		fmt.Print(agentUsage())
 		return nil
@@ -420,6 +423,152 @@ func runMasterGraph(args []string) error {
 	return nil
 }
 
+func runEnvelope(args []string) error {
+	if len(args) < 1 {
+		return fmt.Errorf("expected envelope subcommand (validate|show|apply)")
+	}
+	switch args[0] {
+	case "validate":
+		return envelopeValidate(args[1:])
+	case "show":
+		return envelopeShow(args[1:])
+	case "apply":
+		return envelopeApply(args[1:])
+	case "help", "-h", "--help":
+		fmt.Print(envelopeUsage())
+		return nil
+	default:
+		return fmt.Errorf("unknown envelope subcommand %q", args[0])
+	}
+}
+
+func loadEnvelopeFromFlags(args []string) (envelope.Envelope, []string, error) {
+	var file, preset string
+	rest := []string{}
+	for i := 0; i < len(args); i++ {
+		a := args[i]
+		switch {
+		case a == "--file" || a == "-f":
+			i++
+			if i >= len(args) {
+				return envelope.Envelope{}, nil, fmt.Errorf("%s requires a path", a)
+			}
+			file = args[i]
+		case strings.HasPrefix(a, "--file="):
+			file = strings.TrimPrefix(a, "--file=")
+		case a == "--preset":
+			i++
+			if i >= len(args) {
+				return envelope.Envelope{}, nil, fmt.Errorf("--preset requires a name")
+			}
+			preset = args[i]
+		case strings.HasPrefix(a, "--preset="):
+			preset = strings.TrimPrefix(a, "--preset=")
+		default:
+			rest = append(rest, a)
+		}
+	}
+	switch {
+	case file != "":
+		env, err := envelope.LoadFile(file)
+		return env, rest, err
+	case preset != "":
+		env, err := envelope.Preset(preset)
+		return env, rest, err
+	default:
+		return envelope.Default(), rest, nil
+	}
+}
+
+func envelopeValidate(args []string) error {
+	env, rest, err := loadEnvelopeFromFlags(args)
+	if err != nil {
+		return err
+	}
+	for _, a := range rest {
+		if a == "-h" || a == "--help" {
+			fmt.Print(envelopeUsage())
+			return nil
+		}
+		return fmt.Errorf("unknown flag %q", a)
+	}
+	fmt.Printf("ok envelope=%q performance=%s attack=%.2f peak=%.2f sustain=%.2f release=%s/%s thermal_max_c=%.0f\n",
+		env.Name, env.Performance, env.Attack.Level, env.Peak.Level, env.Sustain.Level,
+		env.Release.Mode, env.Release.Duration.Std(), env.Limits.ThermalMaxC)
+	return nil
+}
+
+func envelopeShow(args []string) error {
+	env, rest, err := loadEnvelopeFromFlags(args)
+	if err != nil {
+		return err
+	}
+	for _, a := range rest {
+		if a == "-h" || a == "--help" {
+			fmt.Print(envelopeUsage())
+			return nil
+		}
+		return fmt.Errorf("unknown flag %q", a)
+	}
+	raw, err := env.MarshalYAML()
+	if err != nil {
+		return err
+	}
+	_, err = os.Stdout.Write(raw)
+	return err
+}
+
+func envelopeApply(args []string) error {
+	env, rest, err := loadEnvelopeFromFlags(args)
+	if err != nil {
+		return err
+	}
+	dur := 2 * time.Second
+	for i := 0; i < len(rest); i++ {
+		a := rest[i]
+		switch {
+		case a == "--duration":
+			i++
+			if i >= len(rest) {
+				return fmt.Errorf("--duration requires a value")
+			}
+			dur, err = time.ParseDuration(rest[i])
+			if err != nil {
+				return err
+			}
+		case strings.HasPrefix(a, "--duration="):
+			dur, err = time.ParseDuration(strings.TrimPrefix(a, "--duration="))
+			if err != nil {
+				return err
+			}
+		case a == "-h" || a == "--help":
+			fmt.Print(envelopeUsage())
+			return nil
+		default:
+			return fmt.Errorf("unknown flag %q", a)
+		}
+	}
+	backends, warns := envelope.OpenBackends()
+	for _, w := range warns {
+		fmt.Fprintf(os.Stderr, "warning: %s\n", w)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), dur+env.Attack.Duration.Std()+env.Peak.Duration.Std()+env.Release.Duration.Std()+time.Second)
+	defer cancel()
+	// Hold sustain for --duration.
+	env.Sustain.Duration = envelope.Duration(dur)
+	ctrl := &envelope.Controller{Env: env, Backends: backends}
+	rep, err := ctrl.Apply(ctx)
+	if err != nil && ctx.Err() == nil {
+		return err
+	}
+	fmt.Printf("applied envelope=%q backends=%v phases=%v final_level=%.2f\n",
+		rep.Envelope, rep.Backends, rep.Phases, rep.FinalLevel)
+	for _, w := range rep.Warnings {
+		fmt.Fprintf(os.Stderr, "warning: %s\n", w)
+	}
+	return nil
+}
+
 func runMasterDemo(args []string) error {
 	tlsF, rest, err := parseTLSFlags(args)
 	if err != nil {
@@ -429,6 +578,7 @@ func runMasterDemo(args []string) error {
 	workers := int32(8)
 	iterations := int32(3)
 	workIters := int64(3_000_000)
+	var envFile, envPreset string
 	for i := 0; i < len(rest); i++ {
 		a := rest[i]
 		switch {
@@ -490,11 +640,48 @@ func runMasterDemo(args []string) error {
 			if err != nil {
 				return err
 			}
+		case a == "--envelope":
+			i++
+			if i >= len(rest) {
+				return fmt.Errorf("--envelope requires a path")
+			}
+			envFile = rest[i]
+		case strings.HasPrefix(a, "--envelope="):
+			envFile = strings.TrimPrefix(a, "--envelope=")
+		case a == "--preset":
+			i++
+			if i >= len(rest) {
+				return fmt.Errorf("--preset requires a name")
+			}
+			envPreset = rest[i]
+		case strings.HasPrefix(a, "--preset="):
+			envPreset = strings.TrimPrefix(a, "--preset=")
 		case a == "-h" || a == "--help":
 			fmt.Print(masterDemoUsage())
 			return nil
 		default:
 			return fmt.Errorf("unknown flag %q", a)
+		}
+	}
+	var envYAML []byte
+	switch {
+	case envFile != "":
+		env, err := envelope.LoadFile(envFile)
+		if err != nil {
+			return err
+		}
+		envYAML, err = env.MarshalYAML()
+		if err != nil {
+			return err
+		}
+	case envPreset != "":
+		env, err := envelope.Preset(envPreset)
+		if err != nil {
+			return err
+		}
+		envYAML, err = env.MarshalYAML()
+		if err != nil {
+			return err
 		}
 	}
 	creds, err := tlsF.clientCreds()
@@ -509,13 +696,14 @@ func runMasterDemo(args []string) error {
 	}
 	defer conn.Close()
 
-	fmt.Fprintf(os.Stderr, "omls master run-demo: workers=%d iterations=%d work_iterations=%d\n",
-		workers, iterations, workIters)
+	fmt.Fprintf(os.Stderr, "omls master run-demo: workers=%d iterations=%d work_iterations=%d envelope=%v\n",
+		workers, iterations, workIters, envFile != "" || envPreset != "")
 	resp, err := client.RunDemo(ctx, &omlsv1.RunDemoRequest{
 		Workers:        workers,
 		Iterations:     iterations,
 		WorkIterations: workIters,
 		TimeoutMs:      180_000,
+		EnvelopeYaml:   envYAML,
 	})
 	if err != nil {
 		return err
@@ -613,14 +801,15 @@ func usage() {
 Usage:
   omls agent discover [--out machine-profile.yaml] [--format yaml|json]
   omls agent run --master HOST:PORT [--ca --cert --key | --insecure]
-  omls agent register --master HOST:PORT [...]   # one-shot join
+  omls agent register --master HOST:PORT [...]
+  omls agent envelope validate|show|apply [--preset NAME | --file PATH]
   omls master serve [--listen :7443] [--ca --cert --key | --insecure]
   omls master graph --master HOST:PORT --out graph.yaml
   omls master health --master HOST:PORT
-  omls master run-demo --master HOST:PORT [--workers 8] [--iterations 3]
+  omls master run-demo --master HOST:PORT [--workers 8] [--preset eco]
   omls version
 
-OMLS 0.3: discovery + fabric + Resource Graph scheduler + EWMA learning demo.
+OMLS 0.4: discovery + fabric + scheduler/EWMA + Resource Envelopes.
 `)
 }
 
@@ -631,11 +820,26 @@ Usage:
   omls agent discover [flags]
   omls agent run [flags]
   omls agent register [flags]
+  omls agent envelope [validate|show|apply]
 
 Commands:
   discover   Probe sysfs/proc and write an RDL Machine Profile
-  run        Discover, register, advertise, and heartbeat to a master
+  run        Discover, register, advertise, heartbeat, and execute work
   register   One-shot register + advertise + heartbeat
+  envelope   Validate/show/apply a Resource Envelope (0.4)
+`
+}
+
+func envelopeUsage() string {
+	return `omls agent envelope — Resource Envelope tools (0.4)
+
+Usage:
+  omls agent envelope validate [--preset balanced|high|eco | --file PATH]
+  omls agent envelope show [--preset NAME | --file PATH]
+  omls agent envelope apply [--preset NAME | --file PATH] [--duration 2s]
+
+Apply uses best-effort backends: userspace duty-cycle (always), cgroup v2
+cpu.max and CPUFreq scaling_max_freq when writable.
 `
 }
 
@@ -682,9 +886,10 @@ func masterDemoUsage() string {
 	return `omls master run-demo — schedule parallel_workers and learn with EWMA
 
 Usage:
-  omls master run-demo --master HOST:PORT [--workers 8] [--iterations 3] [--work-iterations N] (--ca --cert --key | --insecure)
+  omls master run-demo --master HOST:PORT [--workers 8] [--iterations 3] [--work-iterations N] [--preset eco|--envelope FILE] (--ca --cert --key | --insecure)
 
 Agents must be running (` + "`omls agent run`" + `) so they can claim and execute work units.
+Optional --preset/--envelope attaches a Resource Envelope to each work unit (0.4).
 With one node the demo still runs; rebalancing needs ≥2 available nodes.
 `
 }

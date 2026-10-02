@@ -116,6 +116,8 @@ message WorkUnit {
   int64 iterations = 3;    // synthetic CPU burn size
   int32 worker_index = 4;
   int32 worker_count = 5;  // total workers in this demo iteration
+  // Optional Resource Envelope (YAML). Empty → agent default/balanced.
+  bytes envelope_yaml = 6;
 }
 
 message ClaimWorkResponse {
@@ -144,6 +146,8 @@ message RunDemoRequest {
   int64 work_iterations = 3;  // CPU burn per worker unit
   double thermal_ceiling_c = 4; // 0 = default
   int64 timeout_ms = 5;       // overall deadline
+  // Optional Resource Envelope YAML applied to each work unit (OMLS 0.4).
+  bytes envelope_yaml = 6;
 }
 
 message NodeAllocation {

@@ -10,7 +10,8 @@ This repository is **independent** of other company stacks.
 |---|---|
 | **0.1** | `omls agent discover` → Machine Profile (RDL v0) |
 | **0.2** | Multi-node fabric (gRPC + mTLS) + in-memory Resource Graph |
-| **0.3** (this tree) | Resource Graph scheduler + EWMA learning demo (`run-demo`) |
+| **0.3** | Resource Graph scheduler + EWMA learning demo (`run-demo`) |
+| **0.4** (this tree) | Resource Envelopes (attack/peak/sustain/release) |
 
 No kernel fork. No Popcorn. Userspace on stock Linux only.
 
@@ -117,6 +118,29 @@ With a master and one or more `omls agent run` processes:
 ```
 
 The demo schedules `parallel_workers` across available compute nodes, agents burn CPU for each work unit, and the Learning Plane (EWMA of duration / temp delta) adjusts the next split with printed reasons. Missing thermal signals stay neutral. Rebalancing needs ≥2 available nodes.
+
+## Resource Envelopes (0.4)
+
+Workloads can declare an ADSR-style **Resource Envelope** instead of only “run at 100%”:
+
+```bash
+./omls agent envelope show --preset eco
+./omls agent envelope validate --file examples/envelopes/high-burst.yaml
+./omls agent envelope apply --preset eco --duration 2s
+
+# attach envelope to the scheduler demo
+./omls master run-demo --master 127.0.0.1:7443 --insecure --preset eco --workers 4
+```
+
+Backends (best-effort, never crash if missing):
+
+| Backend | Mechanism |
+|---|---|
+| `duty-cycle` | userspace pace/sleep (always available) |
+| `cgroup-cpu` | cgroup v2 `cpu.max` when writable |
+| `cpufreq` | `scaling_max_freq` when writable |
+
+If temperature crosses `limits.thermal_max_c`, the controller clamps the level and records a warning.
 
 ## Root vs non-root
 

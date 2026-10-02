@@ -1,6 +1,6 @@
 # OMLS Plan — 0.1 → 0.3
 
-Status: **0.1–0.3 landed on main** · next: 0.4 Resource Envelopes  
+Status: **0.1–0.4 landed on main** · next: 0.5 Behavior Profiles / telemetry persistence  
 Date: 2026-10-02
 
 ## Locked decisions

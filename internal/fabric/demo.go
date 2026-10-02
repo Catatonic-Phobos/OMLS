@@ -15,12 +15,13 @@ import (
 )
 
 type workUnit struct {
-	ID         string
-	Function   string
-	Iterations int64
-	Index      int32
-	Count      int32
-	NodeID     string
+	ID           string
+	Function     string
+	Iterations   int64
+	Index        int32
+	Count        int32
+	NodeID       string
+	EnvelopeYAML []byte
 }
 
 type workResult struct {
@@ -68,11 +69,12 @@ func (s *Server) ClaimWork(ctx context.Context, req *omlsv1.ClaimWorkRequest) (*
 	return &omlsv1.ClaimWorkResponse{
 		HasWork: true,
 		Unit: &omlsv1.WorkUnit{
-			WorkId:      unit.ID,
-			Function:    unit.Function,
-			Iterations:  unit.Iterations,
-			WorkerIndex: unit.Index,
-			WorkerCount: unit.Count,
+			WorkId:       unit.ID,
+			Function:     unit.Function,
+			Iterations:   unit.Iterations,
+			WorkerIndex:  unit.Index,
+			WorkerCount:  unit.Count,
+			EnvelopeYaml: unit.EnvelopeYAML,
 		},
 	}, nil
 }
@@ -123,6 +125,7 @@ func (s *Server) RunDemo(ctx context.Context, req *omlsv1.RunDemoRequest) (*omls
 	if workIters < 1 {
 		workIters = 3_000_000
 	}
+	envYAML := req.GetEnvelopeYaml()
 	ceiling := req.GetThermalCeilingC()
 	if ceiling <= 0 {
 		ceiling = 85
@@ -179,7 +182,7 @@ func (s *Server) RunDemo(ctx context.Context, req *omlsv1.RunDemoRequest) (*omls
 			alloc, policy = plane.Adjust(alloc, cap, tempNow, tempKnown)
 		}
 
-		units := enqueueAlloc(alloc, workIters, workers)
+		units := enqueueAlloc(alloc, workIters, workers, envYAML)
 		s.demo.mu.Lock()
 		s.demo.queue = map[string][]workUnit{}
 		s.demo.pending = map[string]workUnit{}
@@ -303,7 +306,7 @@ func tempsFromSnapshot(nodes []graph.NodeEntry) (map[string]float64, map[string]
 	return tempNow, tempKnown
 }
 
-func enqueueAlloc(alloc schedule.Allocation, workIters int64, totalWorkers int) []workUnit {
+func enqueueAlloc(alloc schedule.Allocation, workIters int64, totalWorkers int, envYAML []byte) []workUnit {
 	out := []workUnit{}
 	idx := int32(0)
 	for nodeID, n := range alloc {
@@ -313,12 +316,13 @@ func enqueueAlloc(alloc schedule.Allocation, workIters int64, totalWorkers int) 
 		}
 		for i := 0; i < n; i++ {
 			out = append(out, workUnit{
-				ID:         fmt.Sprintf("w-%s-%d", prefix, idx),
-				Function:   "parallel_workers",
-				Iterations: workIters,
-				Index:      idx,
-				Count:      int32(totalWorkers),
-				NodeID:     nodeID,
+				ID:           fmt.Sprintf("w-%s-%d", prefix, idx),
+				Function:     "parallel_workers",
+				Iterations:   workIters,
+				Index:        idx,
+				Count:        int32(totalWorkers),
+				NodeID:       nodeID,
+				EnvelopeYAML: envYAML,
 			})
 			idx++
 		}

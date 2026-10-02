@@ -1,4 +1,4 @@
-// Package work runs synthetic CPU-bound tasks for the OMLS 0.3 demo.
+// Package work runs synthetic CPU-bound tasks for OMLS demos.
 package work
 
 import (
@@ -6,9 +6,14 @@ import (
 	"time"
 )
 
+// Pacer is an optional duty-cycle / throttle hook (Resource Envelope).
+type Pacer interface {
+	Pace(ctx context.Context) error
+}
+
 // Burn runs a CPU-bound loop for roughly `iterations` units of work.
-// Larger iterations → longer duration. Cancel via ctx.
-func Burn(ctx context.Context, iterations int64) (duration time.Duration, err error) {
+// When pacer is non-nil it is invoked periodically to enforce an envelope.
+func Burn(ctx context.Context, iterations int64, pacer Pacer) (duration time.Duration, err error) {
 	if iterations < 1 {
 		iterations = 1
 	}
@@ -21,8 +26,12 @@ func Burn(ctx context.Context, iterations int64) (duration time.Duration, err er
 				return time.Since(start), ctx.Err()
 			default:
 			}
+			if pacer != nil {
+				if err := pacer.Pace(ctx); err != nil {
+					return time.Since(start), err
+				}
+			}
 		}
-		// Dependent arithmetic so the compiler cannot elide the loop.
 		x = x*1664525 + 1013904223
 		x ^= x << 13
 		x ^= x >> 7

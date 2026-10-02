@@ -21,7 +21,7 @@ import (
 	"google.golang.org/grpc/status"
 )
 
-const Version = "0.3.0"
+const Version = "0.4.0"
 
 // Server hosts the Fabric API against an in-memory Resource Graph.
 type Server struct {

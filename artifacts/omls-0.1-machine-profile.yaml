@@ -1,0 +1,216 @@
+rdl_version: "0.1"
+node:
+    id: 44cb5599dcc24b78a2ed9dac18a9b2a5
+    hostname: cursor
+    os:
+        family: linux
+        pretty: Ubuntu 24.04.4 LTS
+        kernel: 6.12.94+
+        arch: amd64
+    virt: hypervisor
+    warnings:
+        - CPUFreq governors not present (common on WSL/VMs)
+        - 'USB sysfs unavailable: open /sys/bus/usb/devices: no such file or directory'
+        - 'hwmon sysfs unavailable (common on WSL): open /sys/class/hwmon: no such file or directory'
+        - no thermal/hwmon sensors discovered
+        - 'powercap sysfs unavailable (common on WSL/VMs): open /sys/class/powercap: no such file or directory'
+resources:
+    - id: cpu0
+      kind: device
+      class: compute
+      capabilities:
+        - compute
+        - parallelizable
+      attrs:
+        arch: x86_64
+        cores: 4
+        logical_cpus: 4
+        model: Intel(R) Xeon(R) Processor
+        online_cpus: 4
+        siblings: 4
+    - id: mem0
+      kind: device
+      class: memory
+      capabilities:
+        - memory
+      attrs:
+        available_bytes: 5054435328
+        free_bytes: 380755968
+        swap_total_bytes: 0
+        total_bytes: 16791945216
+    - id: disk0
+      kind: device
+      class: storage
+      capabilities:
+        - storage
+      attrs:
+        name: vda
+        read_only: false
+        rotational: true
+        size_bytes: 274877906944
+        vendor: "0x1af4"
+    - id: disk1
+      kind: device
+      class: storage
+      capabilities:
+        - storage
+      attrs:
+        name: vdb
+        read_only: false
+        rotational: true
+        size_bytes: 274877906944
+        vendor: "0x1af4"
+    - id: net-docker0
+      kind: device
+      class: network
+      capabilities:
+        - network
+      attrs:
+        addrs:
+            - 172.17.0.1/16
+        mac: ee:56:dd:01:e9:af
+        mtu: 1500
+        name: docker0
+        operstate: down
+    - id: net-enp0s4
+      kind: device
+      class: network
+      capabilities:
+        - network
+      attrs:
+        addrs:
+            - 172.30.0.2/24
+            - fe80::802b:38ff:fe3d:bcd0/64
+        mac: 82:2b:38:3d:bc:d0
+        mtu: 1500
+        name: enp0s4
+        operstate: up
+    - id: net-lo
+      kind: device
+      class: network
+      capabilities:
+        - network
+      attrs:
+        addrs:
+            - 127.0.0.1/8
+            - ::1/128
+        mac: "00:00:00:00:00:00"
+        mtu: 65536
+        name: lo
+        operstate: unknown
+    - id: pci0
+      kind: device
+      class: pci
+      capabilities:
+        - pci
+      attrs:
+        address: "0000:00:00.0"
+        device: "0x0d57"
+        pci_class: "0x060000"
+        subsystem_device: "0x0000"
+        subsystem_vendor: "0x0000"
+        vendor: "0x8086"
+    - id: pci1
+      kind: device
+      class: pci
+      capabilities:
+        - pci
+      attrs:
+        address: "0000:00:01.0"
+        device: "0x1045"
+        pci_class: "0xffff00"
+        subsystem_device: "0x1045"
+        subsystem_vendor: "0x1af4"
+        vendor: "0x1af4"
+    - id: pci2
+      kind: device
+      class: pci
+      capabilities:
+        - pci
+      attrs:
+        address: "0000:00:02.0"
+        device: "0x1042"
+        pci_class: "0x018000"
+        subsystem_device: "0x1042"
+        subsystem_vendor: "0x1af4"
+        vendor: "0x1af4"
+    - id: pci3
+      kind: device
+      class: pci
+      capabilities:
+        - pci
+      attrs:
+        address: "0000:00:03.0"
+        device: "0x1042"
+        pci_class: "0x018000"
+        subsystem_device: "0x1042"
+        subsystem_vendor: "0x1af4"
+        vendor: "0x1af4"
+    - id: pci4
+      kind: device
+      class: pci
+      capabilities:
+        - pci
+      attrs:
+        address: "0000:00:04.0"
+        device: "0x1041"
+        pci_class: "0x020000"
+        subsystem_device: "0x1041"
+        subsystem_vendor: "0x1af4"
+        vendor: "0x1af4"
+    - id: pci5
+      kind: device
+      class: pci
+      capabilities:
+        - pci
+      attrs:
+        address: "0000:00:05.0"
+        device: "0x1053"
+        pci_class: "0xffff00"
+        subsystem_device: "0x1053"
+        subsystem_vendor: "0x1af4"
+        vendor: "0x1af4"
+    - id: pci6
+      kind: device
+      class: pci
+      capabilities:
+        - pci
+      attrs:
+        address: "0000:00:06.0"
+        device: "0x1044"
+        pci_class: "0xffff00"
+        subsystem_device: "0x1044"
+        subsystem_vendor: "0x1af4"
+        vendor: "0x1af4"
+transports:
+    - id: docker0
+      type: other
+      attrs:
+        addrs:
+            - 172.17.0.1/16
+        mac: ee:56:dd:01:e9:af
+        mtu: 1500
+        name: docker0
+        operstate: down
+    - id: enp0s4
+      type: ethernet
+      attrs:
+        addrs:
+            - 172.30.0.2/24
+            - fe80::802b:38ff:fe3d:bcd0/64
+        mac: 82:2b:38:3d:bc:d0
+        mtu: 1500
+        name: enp0s4
+        operstate: up
+    - id: lo
+      type: loopback
+      attrs:
+        addrs:
+            - 127.0.0.1/8
+            - ::1/128
+        mac: "00:00:00:00:00:00"
+        mtu: 65536
+        name: lo
+        operstate: unknown
+limits: []
+behavior: []

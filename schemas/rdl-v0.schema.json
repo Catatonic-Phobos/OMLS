@@ -1,0 +1,111 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/Catatonic-Phobos/OMLS/schemas/rdl-v0.schema.json",
+  "title": "OMLS Resource Description Language v0.1",
+  "type": "object",
+  "required": ["rdl_version", "node", "resources", "transports", "limits", "behavior"],
+  "additionalProperties": false,
+  "properties": {
+    "rdl_version": {
+      "type": "string",
+      "const": "0.1"
+    },
+    "node": {
+      "type": "object",
+      "required": ["id", "hostname", "os"],
+      "additionalProperties": false,
+      "properties": {
+        "id": { "type": "string", "minLength": 1 },
+        "hostname": { "type": "string", "minLength": 1 },
+        "os": {
+          "type": "object",
+          "required": ["family"],
+          "additionalProperties": false,
+          "properties": {
+            "family": { "type": "string", "enum": ["linux"] },
+            "pretty": { "type": "string" },
+            "kernel": { "type": "string" },
+            "arch": { "type": "string" }
+          }
+        },
+        "virt": {
+          "type": "string",
+          "description": "Virtualization / environment tag (e.g. bare, kvm, wsl, docker).",
+          "minLength": 1
+        },
+        "warnings": {
+          "type": "array",
+          "items": { "type": "string" }
+        }
+      }
+    },
+    "resources": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/resource" }
+    },
+    "transports": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/transport" }
+    },
+    "limits": {
+      "type": "array",
+      "items": { "type": "object" }
+    },
+    "behavior": {
+      "type": "array",
+      "items": { "type": "object" },
+      "description": "Empty in OMLS 0.1; reserved for behavior profiles."
+    }
+  },
+  "$defs": {
+    "resource": {
+      "type": "object",
+      "required": ["id", "kind", "class", "capabilities"],
+      "additionalProperties": false,
+      "properties": {
+        "id": { "type": "string", "minLength": 1 },
+        "kind": { "type": "string", "enum": ["device", "logical"] },
+        "class": {
+          "type": "string",
+          "enum": [
+            "compute",
+            "memory",
+            "storage",
+            "network",
+            "graphics",
+            "pci",
+            "usb",
+            "thermal",
+            "power",
+            "other"
+          ]
+        },
+        "capabilities": {
+          "type": "array",
+          "items": { "type": "string", "minLength": 1 },
+          "minItems": 1
+        },
+        "attrs": {
+          "type": "object",
+          "additionalProperties": true
+        }
+      }
+    },
+    "transport": {
+      "type": "object",
+      "required": ["id", "type"],
+      "additionalProperties": false,
+      "properties": {
+        "id": { "type": "string", "minLength": 1 },
+        "type": {
+          "type": "string",
+          "enum": ["ethernet", "wifi", "loopback", "other"]
+        },
+        "attrs": {
+          "type": "object",
+          "additionalProperties": true
+        }
+      }
+    }
+  }
+}

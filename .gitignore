@@ -1,0 +1,26 @@
+# Binaries
+/omls
+/bin/
+*.exe
+*.test
+*.out
+
+# Discover output
+machine-profile.yaml
+machine-profile.json
+*.profile.yaml
+*.profile.json
+
+# Go
+vendor/
+
+# IDE / OS
+.idea/
+.vscode/
+*.swp
+*~
+.DS_Store
+
+# Coverage
+coverage.out
+coverage.html

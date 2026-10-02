@@ -1,6 +1,6 @@
 # OMLS Plan — 0.1 → 0.3
 
-Status: **approved base decisions** · ready to implement after review  
+Status: **0.1 landed on main** · **0.2 fabric in tree** · 0.3 not started  
 Date: 2026-10-02
 
 ## Locked decisions

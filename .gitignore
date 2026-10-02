@@ -5,11 +5,15 @@
 *.test
 *.out
 
-# Discover output
+# Discover / fabric output
 machine-profile.yaml
 machine-profile.json
 *.profile.yaml
 *.profile.json
+graph.yaml
+
+# Dev mTLS materials
+/dev-certs/
 
 # Go
 vendor/

@@ -1,15 +1,15 @@
 # OMLS
 
-**Operational Machine Learning System** — stock Linux userspace control plane that discovers hardware, describes it as a Machine Profile (RDL), and (in later releases) coordinates resources across nodes.
+**Operational Machine Learning System** — stock Linux userspace control plane that discovers hardware, describes it as a Machine Profile (RDL), and coordinates resources across nodes over a gRPC fabric.
 
-This repository is **independent** of other company stacks. OMLS 0.1 is discovery + RDL only.
+This repository is **independent** of other company stacks.
 
 ## Status
 
 | Version | Scope |
 |---|---|
-| **0.1** (this tree) | `omls agent discover` → Machine Profile (RDL v0) |
-| 0.2 | Multi-node fabric (gRPC + mTLS) — not started |
+| **0.1** | `omls agent discover` → Machine Profile (RDL v0) |
+| **0.2** (this tree) | Multi-node fabric (gRPC + mTLS) + in-memory Resource Graph |
 | 0.3 | Resource Graph scheduler + first statistical learning loop — not started |
 
 No kernel fork. No Popcorn. Userspace on stock Linux only.
@@ -22,7 +22,13 @@ Requires Go 1.22+.
 go build -o omls ./cmd/omls
 ```
 
-## Discover
+Regenerate gRPC stubs (optional; checked in):
+
+```bash
+./scripts/gen-proto.sh
+```
+
+## Discover (0.1)
 
 ```bash
 ./omls agent discover --out machine-profile.yaml
@@ -47,9 +53,57 @@ Collectors (best-effort; missing pieces become **warnings**, never a crash):
 
 WSL nodes are tagged `node.virt: wsl`. Limited PCI / hwmon / powercap on WSL is expected; discovery continues with warnings.
 
+## Fabric (0.2)
+
+Two processes, one binary:
+
+```text
+omls master serve   ← Resource Graph
+omls agent run      ← discover + register + heartbeat
+```
+
+### Dev certs (mTLS)
+
+```bash
+./scripts/gen-dev-certs.sh ./dev-certs
+```
+
+### Local lab (plaintext, `--insecure` only)
+
+```bash
+# terminal 1
+./omls master serve --listen 127.0.0.1:7443 --insecure
+
+# terminal 2 (node A)
+./omls agent run --master 127.0.0.1:7443 --insecure
+
+# terminal 3 (operator)
+./omls master health --master 127.0.0.1:7443 --insecure
+./omls master graph --master 127.0.0.1:7443 --insecure --out graph.yaml
+```
+
+### mTLS (preferred)
+
+```bash
+./omls master serve --listen 0.0.0.0:7443 \
+  --ca dev-certs/ca.crt --cert dev-certs/master.crt --key dev-certs/master.key
+
+./omls agent run --master master.example:7443 \
+  --ca dev-certs/ca.crt --cert dev-certs/agent.crt --key dev-certs/agent.key \
+  --server-name localhost
+
+./omls master graph --master master.example:7443 \
+  --ca dev-certs/ca.crt --cert dev-certs/master.crt --key dev-certs/master.key \
+  --server-name localhost --out graph.yaml
+```
+
+`--insecure` disables TLS entirely. Lab / localhost only.
+
+Heartbeat silence beyond `--heartbeat-timeout` (default 15s) marks the node **unavailable** in the graph; the profile is retained.
+
 ## Root vs non-root
 
-Most of 0.1 works as a normal user:
+Most of 0.1/0.2 works as a normal user:
 
 - **Usually readable without root:** `/proc/*`, many `/sys/class/net`, `/sys/block` size/attrs, `/etc/machine-id`, PCI vendor/device/class, basic USB ids.
 - **May need root or capabilities on some hosts:** certain hwmon/powercap energy counters, DMI product fields, some device model strings under `/sys/block/*/device/`.
@@ -58,28 +112,14 @@ If a path is unreadable, OMLS omits that detail and records a warning. Running a
 
 ## RDL v0
 
-Schema: [`schemas/rdl-v0.schema.json`](schemas/rdl-v0.schema.json)  
-Go types + validation: [`internal/rdl`](internal/rdl)
+See [`schemas/rdl-v0.schema.json`](schemas/rdl-v0.schema.json) and [`docs/omls-plan-0.1-0.3.md`](docs/omls-plan-0.1-0.3.md).
 
-```yaml
-rdl_version: "0.1"
-node:
-  id: "<stable-id>"
-  hostname: "..."
-  os: { family: linux, pretty: "..." }
-  virt: bare   # or wsl, kvm, ...
-resources: []
-transports: []
-limits: []
-behavior: []   # empty in 0.1
-```
+## Docs
 
-## Test
-
-```bash
-go test ./...
-```
+- [`docs/omls-vision.md`](docs/omls-vision.md) — full architecture vision
+- [`docs/omls-plan-0.1-0.3.md`](docs/omls-plan-0.1-0.3.md) — implementation plan for 0.1–0.3
+- [`docs/omls-handoff-catatonic.md`](docs/omls-handoff-catatonic.md) — handoff notes
 
 ## License
 
-MIT — see [LICENSE](LICENSE). Experimental phase; legal posture may be revisited later.
+MIT — see [`LICENSE`](LICENSE).

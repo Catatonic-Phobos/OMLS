@@ -154,6 +154,8 @@ message RunDemoRequest {
   int64 timeout_ms = 5;       // overall deadline
   // Optional Resource Envelope YAML applied to each work unit (OMLS 0.4).
   bytes envelope_yaml = 6;
+  // Scheduling policy: "ewma" (0.3 default) or "adaptive" (0.6 multi-signal).
+  string policy = 7;
 }
 
 message NodeAllocation {

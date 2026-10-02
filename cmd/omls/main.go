@@ -21,7 +21,7 @@ import (
 	"google.golang.org/grpc/credentials"
 )
 
-const version = "0.5.0"
+const version = "0.6.0"
 
 func main() {
 	if len(os.Args) < 2 {
@@ -590,10 +590,19 @@ func runMasterDemo(args []string) error {
 	workers := int32(8)
 	iterations := int32(3)
 	workIters := int64(3_000_000)
+	policy := "ewma"
 	var envFile, envPreset string
 	for i := 0; i < len(rest); i++ {
 		a := rest[i]
 		switch {
+		case a == "--policy":
+			i++
+			if i >= len(rest) {
+				return fmt.Errorf("--policy requires ewma|adaptive")
+			}
+			policy = rest[i]
+		case strings.HasPrefix(a, "--policy="):
+			policy = strings.TrimPrefix(a, "--policy=")
 		case a == "--master":
 			i++
 			if i >= len(rest) {
@@ -708,14 +717,15 @@ func runMasterDemo(args []string) error {
 	}
 	defer conn.Close()
 
-	fmt.Fprintf(os.Stderr, "omls master run-demo: workers=%d iterations=%d work_iterations=%d envelope=%v\n",
-		workers, iterations, workIters, envFile != "" || envPreset != "")
+	fmt.Fprintf(os.Stderr, "omls master run-demo: workers=%d iterations=%d work_iterations=%d envelope=%v policy=%s\n",
+		workers, iterations, workIters, envFile != "" || envPreset != "", policy)
 	resp, err := client.RunDemo(ctx, &omlsv1.RunDemoRequest{
 		Workers:        workers,
 		Iterations:     iterations,
 		WorkIterations: workIters,
 		TimeoutMs:      180_000,
 		EnvelopeYaml:   envYAML,
+		Policy:         policy,
 	})
 	if err != nil {
 		return err
@@ -1021,10 +1031,10 @@ Usage:
   omls master graph --master HOST:PORT --out graph.yaml
   omls master health --master HOST:PORT
   omls master profiles list|show --master HOST:PORT [...]
-  omls master run-demo --master HOST:PORT [--workers 8] [--preset eco]
+  omls master run-demo --master HOST:PORT [--workers 8] [--preset eco] [--policy ewma|adaptive]
   omls version
 
-OMLS 0.5: Behavior Profiles + telemetry persistence on the master.
+OMLS 0.6: Adaptive multi-signal scheduling (load/duration/temp/locality/envelope) with hysteresis.
 `)
 }
 
@@ -1112,13 +1122,16 @@ heartbeats/telemetry and run-demo ObserveWork updates.
 }
 
 func masterDemoUsage() string {
-	return `omls master run-demo — schedule parallel_workers and learn with EWMA
+	return `omls master run-demo — schedule parallel_workers and learn
 
 Usage:
-  omls master run-demo --master HOST:PORT [--workers 8] [--iterations 3] [--work-iterations N] [--preset eco|--envelope FILE] (--ca --cert --key | --insecure)
+  omls master run-demo --master HOST:PORT [--workers 8] [--iterations 3] [--work-iterations N]
+       [--preset eco|--envelope FILE] [--policy ewma|adaptive] (--ca --cert --key | --insecure)
 
 Agents must be running (` + "`omls agent run`" + `) so they can claim and execute work units.
 Optional --preset/--envelope attaches a Resource Envelope to each work unit (0.4).
+--policy ewma (default): 0.3 thermal + duration EWMA rules.
+--policy adaptive (0.6): multi-signal blend + hysteresis/cooldown; explainable score notes.
 With one node the demo still runs; rebalancing needs ≥2 available nodes.
 `
 }

@@ -14,7 +14,8 @@ This repository is **independent** of other company stacks.
 | **0.2** | Multi-node fabric (gRPC + mTLS) + in-memory Resource Graph | |
 | **0.3** | Resource Graph scheduler + EWMA learning demo (`run-demo`) | [delivery](docs/layers/0.3-scheduler.md) |
 | **0.4** | Resource Envelopes (attack/peak/sustain/release) | [delivery](docs/layers/0.4-envelopes.md) |
-| **0.5** (this tree) | Behavior Profiles + telemetry persistence | [delivery](docs/layers/0.5-behavior.md) |
+| **0.5** | Behavior Profiles + telemetry persistence | [delivery](docs/layers/0.5-behavior.md) |
+| **0.6** (this tree) | Adaptive multi-signal scheduling + hysteresis | [delivery](docs/layers/0.6-adaptive.md) |
 
 No kernel fork. No Popcorn. Userspace on stock Linux only.
 
@@ -169,6 +170,17 @@ Heartbeats and `StreamTelemetry` append samples; `run-demo` ObserveWork updates 
 
 gRPC: `ListProfiles` / `GetProfile`. Confidence grows with samples (`1 - e^(-n/20)`).
 
+## Adaptive scheduling (0.6)
+
+`run-demo` can use the legacy EWMA policy or a multi-signal **adaptive** policy:
+
+```bash
+./omls master run-demo --master 127.0.0.1:7443 --insecure \
+  --workers 8 --iterations 5 --policy adaptive --preset eco
+```
+
+Adaptive blends duration EWMA, load, temperature headroom, locality/virt, optional envelope intensity, and spare capacity. After a blend move it holds for a cooldown (default 2 rounds) so allocation does not thrash; thermal escape still overrides cooldown. Policy notes print per-node scores.
+
 ## Root vs non-root
 
 Most of 0.1/0.2 works as a normal user:
@@ -184,7 +196,7 @@ See [`schemas/rdl-v0.schema.json`](schemas/rdl-v0.schema.json) and [`docs/omls-p
 
 ## Docs
 
-- [`docs/omls-layers.md`](docs/omls-layers.md) — operational layer hierarchy (0.1→0.5)
+- [`docs/omls-layers.md`](docs/omls-layers.md) — operational layer hierarchy (0.1→0.6)
 - [`docs/layers/`](docs/layers/) — per-layer delivery notes
 - [`docs/omls-vision.md`](docs/omls-vision.md) — full architecture vision
 - [`docs/omls-plan-0.1-0.3.md`](docs/omls-plan-0.1-0.3.md) — implementation plan for 0.1–0.3

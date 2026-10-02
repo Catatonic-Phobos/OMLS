@@ -126,6 +126,8 @@ func (s *Server) RunDemo(ctx context.Context, req *omlsv1.RunDemoRequest) (*omls
 		workIters = 3_000_000
 	}
 	envYAML := req.GetEnvelopeYaml()
+	policyName := learn.NormalizePolicy(req.GetPolicy())
+	envelopeCost := learn.EnvelopeCostFromYAML(envYAML)
 	ceiling := req.GetThermalCeilingC()
 	if ceiling <= 0 {
 		ceiling = 85
@@ -183,7 +185,18 @@ func (s *Server) RunDemo(ctx context.Context, req *omlsv1.RunDemoRequest) (*omls
 			if err != nil {
 				return nil, status.Errorf(codes.FailedPrecondition, "schedule: %v", err)
 			}
-			policy = "initial proportional split by scheduler score"
+			policy = fmt.Sprintf("initial proportional split by scheduler score (policy=%s)", policyName)
+		} else if policyName == learn.PolicyAdaptive {
+			signals := signalsFromSnapshot(snap.Nodes, cap, s.localHostname)
+			alloc, policy = plane.AdaptiveAdjust(alloc, signals, learn.AdaptiveOptions{
+				Weights:          learn.DefaultAdaptiveWeights(),
+				ThermalCeiling:   ceiling,
+				CooldownRounds:    2,
+				MinScoreDelta:    0.12,
+				MaxMovesPerRound: 1,
+				EnvelopeCost:     envelopeCost,
+				Round:            round,
+			})
 		} else {
 			tempNow, tempKnown := tempsFromSnapshot(snap.Nodes)
 			alloc, policy = plane.Adjust(alloc, cap, tempNow, tempKnown)
@@ -321,6 +334,27 @@ func tempsFromSnapshot(nodes []graph.NodeEntry) (map[string]float64, map[string]
 		}
 	}
 	return tempNow, tempKnown
+}
+
+func signalsFromSnapshot(nodes []graph.NodeEntry, cap map[string]int, localHost string) map[string]learn.NodeSignals {
+	out := map[string]learn.NodeSignals{}
+	for _, n := range nodes {
+		sig := learn.NodeSignals{
+			Virt:     n.Virt,
+			IsLocal:  localHost != "" && n.Hostname == localHost,
+			Capacity: cap[n.ID],
+		}
+		if n.Telemetry != nil {
+			sig.Load = n.Telemetry.CPULoad
+			sig.LoadKnown = true
+			if n.Telemetry.TemperatureKnown {
+				sig.TempC = n.Telemetry.TemperatureC
+				sig.TempKnown = true
+			}
+		}
+		out[n.ID] = sig
+	}
+	return out
 }
 
 func enqueueAlloc(alloc schedule.Allocation, workIters int64, totalWorkers int, envYAML []byte) []workUnit {

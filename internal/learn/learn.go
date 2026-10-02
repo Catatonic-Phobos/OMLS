@@ -22,6 +22,7 @@ type Plane struct {
 	Alpha          float64 // EWMA smoothing, default 0.3
 	ThermalCeiling float64 // Celsius
 	nodes          map[string]*Stats
+	adaptive       *AdaptiveState // 0.6 hysteresis (nil until used)
 }
 
 // New creates a learning plane.

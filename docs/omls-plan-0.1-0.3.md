@@ -1,6 +1,6 @@
 # OMLS Plan — 0.1 → 0.3
 
-Status: **0.1–0.5 on main** · hierarchy: [omls-layers.md](omls-layers.md) · next: 0.6 adaptive scheduling  
+Status: **0.1–0.6 on main** · hierarchy: [omls-layers.md](omls-layers.md) · next: 0.7 community hardware profiles  
 Date: 2026-10-02
 
 ## Locked decisions
@@ -39,11 +39,11 @@ Success looks like:
 |---|---|
 | Resource Envelopes (attack/peak/sustain/release) | 0.4 (landed) |
 | Full Behavior Profiles persistence | 0.5 (landed) |
-| Adaptive scheduling beyond simple stats | 0.6 |
+| Adaptive scheduling beyond simple stats | 0.6 (landed) |
 | Community hardware profiles | 0.7 |
 | Driver sandbox / VFIO-UIO | 0.8 |
 | Physical Power Fabric / MCU | 0.9+ |
-| Ollama / Language Plane | after 0.5 infra |
+| Ollama / Language Plane | after 1.0 infra (documented future) |
 | Popcorn-like cross-ISA process migration | research track only |
 
 ---

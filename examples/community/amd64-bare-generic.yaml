@@ -1,0 +1,19 @@
+community_version: "0.7"
+id: amd64-bare-generic
+title: Generic bare-metal amd64
+provenance:
+  source: community
+  author: omls-examples
+  confidence: community_tested
+  confidence_score: 0.65
+match:
+  arch: [x86_64, amd64]
+  virt: [bare]
+  os_family: [linux]
+priors:
+  duration_ewma_ms: 90
+  temp_delta_ewma: 2.5
+  samples: 10
+  notes: Prefer over virt nodes when duration unknown.
+machine_hints:
+  class: compute

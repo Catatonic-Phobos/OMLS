@@ -11,6 +11,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/Catatonic-Phobos/OMLS/internal/community"
 	"github.com/Catatonic-Phobos/OMLS/internal/discover"
 	"github.com/Catatonic-Phobos/OMLS/internal/envelope"
 	"github.com/Catatonic-Phobos/OMLS/internal/fabric"
@@ -19,9 +20,10 @@ import (
 	"github.com/Catatonic-Phobos/OMLS/internal/rdl"
 	omlsv1 "github.com/Catatonic-Phobos/OMLS/proto/omls/v1"
 	"google.golang.org/grpc/credentials"
+	"gopkg.in/yaml.v3"
 )
 
-const version = "0.6.0"
+const version = "0.7.0"
 
 func main() {
 	if len(os.Args) < 2 {
@@ -34,6 +36,8 @@ func main() {
 		err = runAgent(os.Args[2:])
 	case "master":
 		err = runMaster(os.Args[2:])
+	case "community":
+		err = runCommunity(os.Args[2:])
 	case "version", "--version", "-V":
 		fmt.Printf("omls %s\n", version)
 	case "help", "-h", "--help":
@@ -304,6 +308,7 @@ func runMasterServe(args []string) error {
 	hbTimeout := 15 * time.Second
 	interval := 5 * time.Second
 	dataDir := "omls-data"
+	communityDir := ""
 	for i := 0; i < len(rest); i++ {
 		a := rest[i]
 		switch {
@@ -351,6 +356,14 @@ func runMasterServe(args []string) error {
 			dataDir = rest[i]
 		case strings.HasPrefix(a, "--data-dir="):
 			dataDir = strings.TrimPrefix(a, "--data-dir=")
+		case a == "--community-dir":
+			i++
+			if i >= len(rest) {
+				return fmt.Errorf("--community-dir requires a path")
+			}
+			communityDir = rest[i]
+		case strings.HasPrefix(a, "--community-dir="):
+			communityDir = strings.TrimPrefix(a, "--community-dir=")
 		case a == "-h" || a == "--help":
 			fmt.Print(masterServeUsage())
 			return nil
@@ -366,14 +379,18 @@ func runMasterServe(args []string) error {
 	reg := graph.New(hbTimeout)
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
-	fmt.Fprintf(os.Stderr, "omls master: listening on %s (insecure=%v heartbeat-timeout=%s data-dir=%s)\n",
-		listen, tlsF.insecure, hbTimeout, dataDir)
+	if communityDir == "" {
+		communityDir = community.ResolveDir("")
+	}
+	fmt.Fprintf(os.Stderr, "omls master: listening on %s (insecure=%v heartbeat-timeout=%s data-dir=%s community-dir=%s)\n",
+		listen, tlsF.insecure, hbTimeout, dataDir, communityDir)
 	return fabric.ListenAndServe(ctx, fabric.ServeOptions{
-		Listen:   listen,
-		TLS:      creds,
-		Registry: reg,
-		Interval: interval,
-		DataDir:  dataDir,
+		Listen:       listen,
+		TLS:          creds,
+		Registry:     reg,
+		Interval:     interval,
+		DataDir:      dataDir,
+		CommunityDir: communityDir,
 	})
 }
 
@@ -975,6 +992,148 @@ func truncate(s string, n int) string {
 	return s[:n-3] + "..."
 }
 
+func runCommunity(args []string) error {
+	if len(args) < 1 {
+		return fmt.Errorf("expected community subcommand (list|show|import)")
+	}
+	switch args[0] {
+	case "list":
+		return communityList(args[1:])
+	case "show":
+		return communityShow(args[1:])
+	case "import":
+		return communityImport(args[1:])
+	case "help", "-h", "--help":
+		fmt.Print(communityUsage())
+		return nil
+	default:
+		return fmt.Errorf("unknown community subcommand %q", args[0])
+	}
+}
+
+func parseCommunityDir(args []string) (dir string, rest []string, err error) {
+	dir = ""
+	for i := 0; i < len(args); i++ {
+		a := args[i]
+		switch {
+		case a == "--dir":
+			i++
+			if i >= len(args) {
+				return "", nil, fmt.Errorf("--dir requires a path")
+			}
+			dir = args[i]
+		case strings.HasPrefix(a, "--dir="):
+			dir = strings.TrimPrefix(a, "--dir=")
+		default:
+			rest = append(rest, a)
+		}
+	}
+	if dir == "" {
+		dir = community.ResolveDir("")
+	}
+	return dir, rest, nil
+}
+
+func communityList(args []string) error {
+	dir, rest, err := parseCommunityDir(args)
+	if err != nil {
+		return err
+	}
+	for _, a := range rest {
+		if a == "-h" || a == "--help" {
+			fmt.Print(communityUsage())
+			return nil
+		}
+		return fmt.Errorf("unknown flag %q", a)
+	}
+	cat, err := community.Open(dir)
+	if err != nil {
+		return err
+	}
+	fmt.Fprintf(os.Stderr, "community_dir=%s profiles=%d\n", cat.Dir, len(cat.Profiles))
+	if len(cat.Profiles) == 0 {
+		fmt.Println("(no community profiles)")
+		return nil
+	}
+	fmt.Printf("%-24s %-12s %6s  %s\n", "ID", "CONFIDENCE", "SCORE", "TITLE")
+	for _, p := range cat.Profiles {
+		fmt.Printf("%-24s %-12s %6.2f  %s\n",
+			p.ID, p.Provenance.Confidence, p.Provenance.ConfidenceScore, p.Title)
+	}
+	return nil
+}
+
+func communityShow(args []string) error {
+	dir, rest, err := parseCommunityDir(args)
+	if err != nil {
+		return err
+	}
+	id := ""
+	for _, a := range rest {
+		if a == "-h" || a == "--help" {
+			fmt.Print(communityUsage())
+			return nil
+		}
+		if strings.HasPrefix(a, "-") {
+			return fmt.Errorf("unknown flag %q", a)
+		}
+		if id == "" {
+			id = a
+			continue
+		}
+		return fmt.Errorf("unexpected arg %q", a)
+	}
+	if id == "" {
+		return fmt.Errorf("profile id required")
+	}
+	cat, err := community.Open(dir)
+	if err != nil {
+		return err
+	}
+	p, ok := cat.Get(id)
+	if !ok {
+		return fmt.Errorf("profile %q not found in %s", id, dir)
+	}
+	p.SourcePath = ""
+	raw, err := yaml.Marshal(p)
+	if err != nil {
+		return err
+	}
+	_, err = os.Stdout.Write(raw)
+	return err
+}
+
+func communityImport(args []string) error {
+	dir, rest, err := parseCommunityDir(args)
+	if err != nil {
+		return err
+	}
+	src := ""
+	for _, a := range rest {
+		if a == "-h" || a == "--help" {
+			fmt.Print(communityUsage())
+			return nil
+		}
+		if strings.HasPrefix(a, "-") {
+			return fmt.Errorf("unknown flag %q", a)
+		}
+		if src == "" {
+			src = a
+			continue
+		}
+		return fmt.Errorf("unexpected arg %q", a)
+	}
+	if src == "" {
+		return fmt.Errorf("path to profile yaml required")
+	}
+	p, err := community.ImportFile(dir, src)
+	if err != nil {
+		return err
+	}
+	fmt.Fprintf(os.Stderr, "imported %s → %s\n", p.ID, p.SourcePath)
+	return nil
+}
+
 func runMasterHealth(args []string) error {
 	tlsF, rest, err := parseTLSFlags(args)
 	if err != nil {
@@ -1027,14 +1186,15 @@ Usage:
   omls agent run --master HOST:PORT [--ca --cert --key | --insecure]
   omls agent register --master HOST:PORT [...]
   omls agent envelope validate|show|apply [--preset NAME | --file PATH]
-  omls master serve [--listen :7443] [--data-dir omls-data] [--ca --cert --key | --insecure]
+  omls master serve [--listen :7443] [--data-dir omls-data] [--community-dir DIR] [--ca --cert --key | --insecure]
   omls master graph --master HOST:PORT --out graph.yaml
   omls master health --master HOST:PORT
   omls master profiles list|show --master HOST:PORT [...]
   omls master run-demo --master HOST:PORT [--workers 8] [--preset eco] [--policy ewma|adaptive]
+  omls community list|show|import [--dir DIR]
   omls version
 
-OMLS 0.6: Adaptive multi-signal scheduling (load/duration/temp/locality/envelope) with hysteresis.
+OMLS 0.7: Community hardware profiles (shared priors with provenance).
 `)
 }
 
@@ -1136,15 +1296,30 @@ With one node the demo still runs; rebalancing needs ≥2 available nodes.
 `
 }
 
+func communityUsage() string {
+	return `omls community — shared hardware/behavior profile snippets (0.7)
+
+Usage:
+  omls community list [--dir DIR]
+  omls community show ID [--dir DIR]
+  omls community import PATH [--dir DIR]
+
+Default --dir resolves to the first existing of: community/, profiles/, examples/community/.
+Import validates YAML and copies into --dir. Master --community-dir applies matching
+priors on AdvertiseProfile when the node has no local Behavior observations yet.
+`
+}
+
 func masterServeUsage() string {
 	return `omls master serve — run the fabric control plane
 
 Usage:
-  omls master serve [--listen :7443] [--data-dir omls-data] [--heartbeat-timeout 15s] (--ca CA --cert CERT --key KEY | --insecure)
+  omls master serve [--listen :7443] [--data-dir omls-data] [--community-dir DIR] [--heartbeat-timeout 15s] (--ca CA --cert CERT --key KEY | --insecure)
 
 Flags:
   --listen ADDR              Bind address (default :7443)
   --data-dir PATH            Behavior Profiles + telemetry store (default omls-data)
+  --community-dir PATH       Community profile catalog (default: community/ or examples/community/)
   --heartbeat-timeout DUR    Mark node unavailable after this silence (default 15s)
   --interval DUR             Suggested agent heartbeat interval (default 5s)
   --ca/--cert/--key          mTLS materials (server requires client certs)

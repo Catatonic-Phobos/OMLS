@@ -1,0 +1,21 @@
+community_version: "0.7"
+id: amd64-kvm-generic
+title: Generic KVM/QEMU amd64 VM
+provenance:
+  source: community
+  author: omls-examples
+  confidence: community_tested
+  confidence_score: 0.6
+  notes: Soft prior for typical cloud/lab VMs without reliable hwmon.
+match:
+  arch: [x86_64, amd64]
+  virt: [kvm, qemu]
+  os_family: [linux]
+priors:
+  duration_ewma_ms: 140
+  temp_delta_ewma: 1.0
+  samples: 8
+  notes: Slightly slower than bare metal; thermal often unknown.
+machine_hints:
+  class: compute
+  capabilities: [compute, parallelizable]

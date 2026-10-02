@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/Catatonic-Phobos/OMLS/internal/behavior"
+	"github.com/Catatonic-Phobos/OMLS/internal/community"
 	"github.com/Catatonic-Phobos/OMLS/internal/graph"
 	"github.com/Catatonic-Phobos/OMLS/internal/rdl"
 	omlsv1 "github.com/Catatonic-Phobos/OMLS/proto/omls/v1"
@@ -24,13 +25,14 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-const Version = "0.6.0"
+const Version = "0.7.0"
 
 // Server hosts the Fabric API against an in-memory Resource Graph.
 type Server struct {
 	omlsv1.UnimplementedFabricServer
 	reg            *graph.Registry
 	store          *behavior.Store
+	community      *community.Catalog
 	heartbeatEvery time.Duration
 	version        string
 	demo           *demoState
@@ -44,6 +46,11 @@ func NewServer(reg *graph.Registry, heartbeatEvery time.Duration) *Server {
 
 // NewServerWithStore is like NewServer but uses an existing Behavior Profile store.
 func NewServerWithStore(reg *graph.Registry, heartbeatEvery time.Duration, store *behavior.Store) *Server {
+	return NewServerFull(reg, heartbeatEvery, store, nil)
+}
+
+// NewServerFull wires Behavior store and optional community catalog.
+func NewServerFull(reg *graph.Registry, heartbeatEvery time.Duration, store *behavior.Store, cat *community.Catalog) *Server {
 	if heartbeatEvery <= 0 {
 		heartbeatEvery = 5 * time.Second
 	}
@@ -54,6 +61,7 @@ func NewServerWithStore(reg *graph.Registry, heartbeatEvery time.Duration, store
 	return &Server{
 		reg:            reg,
 		store:          store,
+		community:      cat,
 		heartbeatEvery: heartbeatEvery,
 		version:        Version,
 		demo:           newDemoState(),
@@ -63,6 +71,9 @@ func NewServerWithStore(reg *graph.Registry, heartbeatEvery time.Duration, store
 
 // Store exposes the Behavior Profile store (tests / CLI local dumps).
 func (s *Server) Store() *behavior.Store { return s.store }
+
+// Community exposes the community catalog (may be nil).
+func (s *Server) Community() *community.Catalog { return s.community }
 
 // Registry exposes the backing graph (for tests / local dumps).
 func (s *Server) Registry() *graph.Registry { return s.reg }
@@ -116,7 +127,22 @@ func (s *Server) AdvertiseProfile(ctx context.Context, req *omlsv1.AdvertiseProf
 	if err := s.reg.Advertise(req.GetNodeId(), req.GetSessionId(), doc); err != nil {
 		return nil, status.Errorf(codes.FailedPrecondition, "%v", err)
 	}
+	s.maybeApplyCommunityPrior(req.GetNodeId(), doc)
 	return &omlsv1.AdvertiseProfileResponse{Ok: true, ResourceCount: int32(len(doc.Resources))}, nil
+}
+
+func (s *Server) maybeApplyCommunityPrior(nodeID string, doc *rdl.Document) {
+	if s.community == nil || s.store == nil || doc == nil {
+		return
+	}
+	facts := community.FactsFromRDL(doc)
+	best, score, ok := s.community.BestMatch(facts)
+	if !ok || score <= 0 || best.Priors.Samples <= 0 {
+		return
+	}
+	host, virt := doc.Node.Hostname, doc.Node.Virt
+	_, _ = s.store.ApplyCommunityPrior(nodeID, host, virt, best.ID,
+		best.Priors.DurationEWMAMs, best.Priors.TempDeltaEWMA, best.Priors.Samples)
 }
 
 func (s *Server) StreamTelemetry(stream omlsv1.Fabric_StreamTelemetryServer) error {
@@ -278,12 +304,14 @@ func newSessionID() string {
 
 // ServeOptions configures the gRPC listener.
 type ServeOptions struct {
-	Listen   string
-	TLS      credentials.TransportCredentials // nil => insecure (dev-only)
-	Registry *graph.Registry
-	Interval time.Duration
-	DataDir  string // Behavior Profiles + telemetry (default omls-data)
-	Store    *behavior.Store
+	Listen       string
+	TLS          credentials.TransportCredentials // nil => insecure (dev-only)
+	Registry     *graph.Registry
+	Interval     time.Duration
+	DataDir      string // Behavior Profiles + telemetry (default omls-data)
+	Store        *behavior.Store
+	CommunityDir string // optional community profile catalog (0.7)
+	Community    *community.Catalog
 }
 
 // ListenAndServe starts the fabric master until ctx is cancelled.
@@ -302,6 +330,14 @@ func ListenAndServe(ctx context.Context, opt ServeOptions) error {
 			return fmt.Errorf("behavior store: %w", err)
 		}
 	}
+	cat := opt.Community
+	if cat == nil && opt.CommunityDir != "" {
+		var err error
+		cat, err = community.Open(opt.CommunityDir)
+		if err != nil {
+			return fmt.Errorf("community catalog: %w", err)
+		}
+	}
 	lis, err := net.Listen("tcp", opt.Listen)
 	if err != nil {
 		return err
@@ -313,7 +349,7 @@ func ListenAndServe(ctx context.Context, opt ServeOptions) error {
 		serverOpts = append(serverOpts, grpc.Creds(opt.TLS))
 	}
 	gs := grpc.NewServer(serverOpts...)
-	omlsv1.RegisterFabricServer(gs, NewServerWithStore(opt.Registry, opt.Interval, store))
+	omlsv1.RegisterFabricServer(gs, NewServerFull(opt.Registry, opt.Interval, store, cat))
 
 	errCh := make(chan error, 1)
 	go func() {

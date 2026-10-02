@@ -15,7 +15,8 @@ This repository is **independent** of other company stacks.
 | **0.3** | Resource Graph scheduler + EWMA learning demo (`run-demo`) | [delivery](docs/layers/0.3-scheduler.md) |
 | **0.4** | Resource Envelopes (attack/peak/sustain/release) | [delivery](docs/layers/0.4-envelopes.md) |
 | **0.5** | Behavior Profiles + telemetry persistence | [delivery](docs/layers/0.5-behavior.md) |
-| **0.6** (this tree) | Adaptive multi-signal scheduling + hysteresis | [delivery](docs/layers/0.6-adaptive.md) |
+| **0.6** | Adaptive multi-signal scheduling + hysteresis | [delivery](docs/layers/0.6-adaptive.md) |
+| **0.7** (this tree) | Community hardware profiles + priors | [delivery](docs/layers/0.7-community.md) |
 
 No kernel fork. No Popcorn. Userspace on stock Linux only.
 
@@ -181,6 +182,21 @@ gRPC: `ListProfiles` / `GetProfile`. Confidence grows with samples (`1 - e^(-n/2
 
 Adaptive blends duration EWMA, load, temperature headroom, locality/virt, optional envelope intensity, and spare capacity. After a blend move it holds for a cooldown (default 2 rounds) so allocation does not thrash; thermal escape still overrides cooldown. Policy notes print per-node scores.
 
+## Community profiles (0.7)
+
+Shared YAML snippets under `examples/community/` (or `community/` / `profiles/`) carry match heuristics and soft EWMA priors with provenance:
+
+```bash
+./omls community list --dir examples/community
+./omls community show amd64-wsl --dir examples/community
+./omls community import examples/community/amd64-kvm-generic.yaml --dir ./community
+
+./omls master serve --listen 127.0.0.1:7443 --insecure \
+  --data-dir ./omls-data --community-dir examples/community
+```
+
+When an agent advertises its Machine Profile, the master best-effort matches arch/virt/model and seeds the Behavior store **only if** that node has no local observations yet.
+
 ## Root vs non-root
 
 Most of 0.1/0.2 works as a normal user:
@@ -196,7 +212,7 @@ See [`schemas/rdl-v0.schema.json`](schemas/rdl-v0.schema.json) and [`docs/omls-p
 
 ## Docs
 
-- [`docs/omls-layers.md`](docs/omls-layers.md) — operational layer hierarchy (0.1→0.6)
+- [`docs/omls-layers.md`](docs/omls-layers.md) — operational layer hierarchy (0.1→0.7)
 - [`docs/layers/`](docs/layers/) — per-layer delivery notes
 - [`docs/omls-vision.md`](docs/omls-vision.md) — full architecture vision
 - [`docs/omls-plan-0.1-0.3.md`](docs/omls-plan-0.1-0.3.md) — implementation plan for 0.1–0.3

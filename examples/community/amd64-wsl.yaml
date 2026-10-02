@@ -1,0 +1,21 @@
+community_version: "0.7"
+id: amd64-wsl
+title: Windows WSL2 amd64 node
+provenance:
+  source: community
+  author: omls-examples
+  confidence: experimental
+  confidence_score: 0.4
+  notes: WSL lacks real PCI passthrough and often lacks thermal/powercap.
+match:
+  arch: [x86_64, amd64]
+  virt: [wsl]
+  os_family: [linux]
+priors:
+  duration_ewma_ms: 220
+  temp_delta_ewma: 0
+  samples: 6
+  notes: Expect higher duration variance; treat thermal as neutral.
+machine_hints:
+  virt: wsl
+  limitations: [no_pci_passthrough, weak_hwmon]

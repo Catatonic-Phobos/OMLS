@@ -19,22 +19,22 @@ const ProfileVersion = "0.5"
 
 // TelemetrySample is one persisted host sample.
 type TelemetrySample struct {
-	ObservedAt         time.Time `json:"observed_at" yaml:"observed_at"`
-	CPULoad            float64   `json:"cpu_load" yaml:"cpu_load"`
-	MemAvailableBytes  int64     `json:"mem_available_bytes" yaml:"mem_available_bytes"`
-	MemTotalBytes      int64     `json:"mem_total_bytes" yaml:"mem_total_bytes"`
-	TemperatureC       float64   `json:"temperature_c,omitempty" yaml:"temperature_c,omitempty"`
-	TemperatureKnown   bool      `json:"temperature_known" yaml:"temperature_known"`
+	ObservedAt        time.Time `json:"observed_at" yaml:"observed_at"`
+	CPULoad           float64   `json:"cpu_load" yaml:"cpu_load"`
+	MemAvailableBytes int64     `json:"mem_available_bytes" yaml:"mem_available_bytes"`
+	MemTotalBytes     int64     `json:"mem_total_bytes" yaml:"mem_total_bytes"`
+	TemperatureC      float64   `json:"temperature_c,omitempty" yaml:"temperature_c,omitempty"`
+	TemperatureKnown  bool      `json:"temperature_known" yaml:"temperature_known"`
 }
 
 // ResourceObserved is learned stats for one resource (usually compute).
 type ResourceObserved struct {
-	DurationEWMAMs float64 `json:"duration_ewma_ms" yaml:"duration_ewma_ms"`
-	TempDeltaEWMA  float64 `json:"temp_delta_ewma" yaml:"temp_delta_ewma"`
-	TempEWMAC      float64 `json:"temp_ewma_c,omitempty" yaml:"temp_ewma_c,omitempty"`
-	TempKnown      bool    `json:"temp_known" yaml:"temp_known"`
-	Samples        int     `json:"samples" yaml:"samples"`
-	LastDurationMs float64 `json:"last_duration_ms,omitempty" yaml:"last_duration_ms,omitempty"`
+	DurationEWMAMs float64   `json:"duration_ewma_ms" yaml:"duration_ewma_ms"`
+	TempDeltaEWMA  float64   `json:"temp_delta_ewma" yaml:"temp_delta_ewma"`
+	TempEWMAC      float64   `json:"temp_ewma_c,omitempty" yaml:"temp_ewma_c,omitempty"`
+	TempKnown      bool      `json:"temp_known" yaml:"temp_known"`
+	Samples        int       `json:"samples" yaml:"samples"`
+	LastDurationMs float64   `json:"last_duration_ms,omitempty" yaml:"last_duration_ms,omitempty"`
 	LastSeen       time.Time `json:"last_seen,omitempty" yaml:"last_seen,omitempty"`
 }
 
@@ -313,18 +313,18 @@ func (s *Store) DurationEWMA(nodeID string) (float64, int, bool) {
 
 // SeedPlaneStats returns map nodeID → (durationEWMA, tempDeltaEWMA, samples) for learning.
 func (s *Store) SeedPlaneStats() (map[string]struct {
-	Duration float64
+	Duration  float64
 	TempDelta float64
-	Samples int
+	Samples   int
 }, error) {
 	list, err := s.List()
 	if err != nil {
 		return nil, err
 	}
 	out := map[string]struct {
-		Duration float64
+		Duration  float64
 		TempDelta float64
-		Samples int
+		Samples   int
 	}{}
 	for _, p := range list {
 		for _, r := range p.Resources {
@@ -335,14 +335,52 @@ func (s *Store) SeedPlaneStats() (map[string]struct {
 				continue
 			}
 			out[p.NodeID] = struct {
-				Duration float64
+				Duration  float64
 				TempDelta float64
-				Samples int
+				Samples   int
 			}{Duration: r.Observed.DurationEWMAMs, TempDelta: r.Observed.TempDeltaEWMA, Samples: r.Observed.Samples}
 			break
 		}
 	}
 	return out, nil
+}
+
+// ApplyCommunityPrior seeds a Behavior Profile from a community snippet when the
+// node has no local compute observations yet. Returns applied=false if skipped.
+func (s *Store) ApplyCommunityPrior(nodeID, hostname, virt, communityID string, durationEWMA, tempDelta float64, samples int) (bool, error) {
+	if samples <= 0 || nodeID == "" {
+		return false, nil
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	p, err := s.loadUnlocked(nodeID)
+	if err != nil {
+		return false, err
+	}
+	if hostname != "" {
+		p.Hostname = hostname
+	}
+	if virt != "" {
+		p.Virt = virt
+	}
+	rp := ensureResource(&p, "cpu0", "compute")
+	if rp.Observed.Samples > 0 {
+		return false, nil // local observations win
+	}
+	rp.Observed.DurationEWMAMs = durationEWMA
+	rp.Observed.TempDeltaEWMA = tempDelta
+	rp.Observed.Samples = samples
+	rp.Observed.LastSeen = time.Now().UTC()
+	rp.Confidence = Confidence(samples) * 0.5 // community prior is softer
+	if communityID != "" {
+		if p.RecentTelemetry == nil {
+			p.RecentTelemetry = []TelemetrySample{}
+		}
+	}
+	if err := s.saveUnlocked(p); err != nil {
+		return false, err
+	}
+	return true, nil
 }
 
 func ensureResource(p *Profile, id, class string) *ResourceProfile {

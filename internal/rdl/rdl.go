@@ -129,7 +129,7 @@ func validateResource(i int, r Resource) error {
 		return fmt.Errorf("resources[%d].kind: invalid %q", i, r.Kind)
 	}
 	switch r.Class {
-	case "compute", "memory", "storage", "network", "graphics", "pci", "usb", "thermal", "power", "other":
+	case "compute", "memory", "storage", "network", "graphics", "pci", "usb", "thermal", "power", "sandbox", "other":
 	default:
 		return fmt.Errorf("resources[%d].class: invalid %q", i, r.Class)
 	}

@@ -25,7 +25,7 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-const Version = "0.7.0"
+const Version = "0.8.0"
 
 // Server hosts the Fabric API against an in-memory Resource Graph.
 type Server struct {

@@ -18,12 +18,13 @@ import (
 	"github.com/Catatonic-Phobos/OMLS/internal/fabric/tlsconfig"
 	"github.com/Catatonic-Phobos/OMLS/internal/graph"
 	"github.com/Catatonic-Phobos/OMLS/internal/rdl"
+	"github.com/Catatonic-Phobos/OMLS/internal/sandbox"
 	omlsv1 "github.com/Catatonic-Phobos/OMLS/proto/omls/v1"
 	"google.golang.org/grpc/credentials"
 	"gopkg.in/yaml.v3"
 )
 
-const version = "0.7.0"
+const version = "0.8.0"
 
 func main() {
 	if len(os.Args) < 2 {
@@ -55,7 +56,7 @@ func main() {
 
 func runAgent(args []string) error {
 	if len(args) < 1 {
-		return fmt.Errorf("expected subcommand (discover|run|register|envelope)")
+		return fmt.Errorf("expected subcommand (discover|run|register|envelope|sandbox)")
 	}
 	switch args[0] {
 	case "discover":
@@ -66,6 +67,8 @@ func runAgent(args []string) error {
 		return runAgentLoop(args[1:], true)
 	case "envelope":
 		return runEnvelope(args[1:])
+	case "sandbox":
+		return runSandbox(args[1:])
 	case "help", "-h", "--help":
 		fmt.Print(agentUsage())
 		return nil
@@ -101,6 +104,7 @@ func runDiscover(args []string) error {
 	out := "machine-profile.yaml"
 	format := ""
 	quiet := false
+	withSandbox := false
 
 	for i := 0; i < len(args); i++ {
 		a := args[i]
@@ -123,6 +127,8 @@ func runDiscover(args []string) error {
 			format = strings.TrimPrefix(a, "--format=")
 		case a == "--quiet" || a == "-q":
 			quiet = true
+		case a == "--sandbox":
+			withSandbox = true
 		case a == "-h" || a == "--help":
 			fmt.Print(discoverUsage())
 			return nil
@@ -139,6 +145,11 @@ func runDiscover(args []string) error {
 	if err != nil {
 		return err
 	}
+	if withSandbox {
+		probe := sandbox.Probe(sandbox.Options{})
+		sandbox.MergeIntoDocument(&res.Document, probe)
+		res.Warnings = append(res.Warnings, probe.Warnings...)
+	}
 	if err := rdl.WriteFile(out, format, &res.Document); err != nil {
 		return err
 	}
@@ -150,6 +161,142 @@ func runDiscover(args []string) error {
 		fmt.Fprintf(os.Stderr, "wrote %s (node=%s virt=%s resources=%d transports=%d)\n",
 			out, res.Document.Node.ID, res.Document.Node.Virt,
 			len(res.Document.Resources), len(res.Document.Transports))
+	}
+	return nil
+}
+
+func runSandbox(args []string) error {
+	if len(args) < 1 {
+		return fmt.Errorf("expected sandbox subcommand (probe|list|claim)")
+	}
+	switch args[0] {
+	case "probe":
+		return sandboxProbe(args[1:])
+	case "list":
+		return sandboxList(args[1:])
+	case "claim":
+		return sandboxClaim(args[1:])
+	case "help", "-h", "--help":
+		fmt.Print(sandboxUsage())
+		return nil
+	default:
+		return fmt.Errorf("unknown sandbox subcommand %q", args[0])
+	}
+}
+
+func sandboxProbe(args []string) error {
+	sysRoot := ""
+	for i := 0; i < len(args); i++ {
+		a := args[i]
+		switch {
+		case a == "--sys-root":
+			i++
+			if i >= len(args) {
+				return fmt.Errorf("--sys-root requires a path")
+			}
+			sysRoot = args[i]
+		case strings.HasPrefix(a, "--sys-root="):
+			sysRoot = strings.TrimPrefix(a, "--sys-root=")
+		case a == "-h" || a == "--help":
+			fmt.Print(sandboxUsage())
+			return nil
+		default:
+			return fmt.Errorf("unknown flag %q", a)
+		}
+	}
+	res := sandbox.Probe(sandbox.Options{SysRoot: sysRoot})
+	for _, w := range res.Warnings {
+		fmt.Fprintf(os.Stderr, "warning: %s\n", w)
+	}
+	fmt.Printf("backend=%s vfio=%v uio=%v devices=%d\n",
+		res.Backend, res.VFIOPresent, res.UIOPresent, len(res.Devices))
+	raw, err := yaml.Marshal(res)
+	if err != nil {
+		return err
+	}
+	_, err = os.Stdout.Write(raw)
+	return err
+}
+
+func sandboxList(args []string) error {
+	sysRoot := ""
+	for i := 0; i < len(args); i++ {
+		a := args[i]
+		switch {
+		case a == "--sys-root":
+			i++
+			if i >= len(args) {
+				return fmt.Errorf("--sys-root requires a path")
+			}
+			sysRoot = args[i]
+		case strings.HasPrefix(a, "--sys-root="):
+			sysRoot = strings.TrimPrefix(a, "--sys-root=")
+		case a == "-h" || a == "--help":
+			fmt.Print(sandboxUsage())
+			return nil
+		default:
+			return fmt.Errorf("unknown flag %q", a)
+		}
+	}
+	res := sandbox.Probe(sandbox.Options{SysRoot: sysRoot})
+	for _, w := range res.Warnings {
+		fmt.Fprintf(os.Stderr, "warning: %s\n", w)
+	}
+	if len(res.Devices) == 0 {
+		fmt.Println("(no sandbox devices; backend=" + string(res.Backend) + ")")
+		return nil
+	}
+	fmt.Printf("%-20s %-10s %-8s %s\n", "ID", "BACKEND", "CLAIM", "NAME")
+	for _, d := range res.Devices {
+		fmt.Printf("%-20s %-10s %-8v %s\n", d.ID, d.Backend, d.Claimable, d.Name)
+	}
+	return nil
+}
+
+func sandboxClaim(args []string) error {
+	sysRoot := ""
+	id := ""
+	for i := 0; i < len(args); i++ {
+		a := args[i]
+		switch {
+		case a == "--sys-root":
+			i++
+			if i >= len(args) {
+				return fmt.Errorf("--sys-root requires a path")
+			}
+			sysRoot = args[i]
+		case strings.HasPrefix(a, "--sys-root="):
+			sysRoot = strings.TrimPrefix(a, "--sys-root=")
+		case a == "--id":
+			i++
+			if i >= len(args) {
+				return fmt.Errorf("--id requires a device id")
+			}
+			id = args[i]
+		case strings.HasPrefix(a, "--id="):
+			id = strings.TrimPrefix(a, "--id=")
+		case a == "-h" || a == "--help":
+			fmt.Print(sandboxUsage())
+			return nil
+		default:
+			if !strings.HasPrefix(a, "-") && id == "" {
+				id = a
+				continue
+			}
+			return fmt.Errorf("unknown flag %q", a)
+		}
+	}
+	if id == "" {
+		return fmt.Errorf("device id required")
+	}
+	res := sandbox.Claim(sandbox.Options{SysRoot: sysRoot}, id)
+	for _, w := range res.Warnings {
+		fmt.Fprintf(os.Stderr, "warning: %s\n", w)
+	}
+	fmt.Printf("ok=%v simulated=%v backend=%s device=%s\n%s\n",
+		res.OK, res.Simulated, res.Backend, res.DeviceID, res.Message)
+	if !res.OK {
+		return fmt.Errorf("claim failed")
 	}
 	return nil
 }
@@ -1182,10 +1329,11 @@ func usage() {
 	fmt.Print(`omls — Operational Machine Learning System
 
 Usage:
-  omls agent discover [--out machine-profile.yaml] [--format yaml|json]
+  omls agent discover [--out machine-profile.yaml] [--format yaml|json] [--sandbox]
   omls agent run --master HOST:PORT [--ca --cert --key | --insecure]
   omls agent register --master HOST:PORT [...]
   omls agent envelope validate|show|apply [--preset NAME | --file PATH]
+  omls agent sandbox probe|list|claim
   omls master serve [--listen :7443] [--data-dir omls-data] [--community-dir DIR] [--ca --cert --key | --insecure]
   omls master graph --master HOST:PORT --out graph.yaml
   omls master health --master HOST:PORT
@@ -1194,7 +1342,7 @@ Usage:
   omls community list|show|import [--dir DIR]
   omls version
 
-OMLS 0.7: Community hardware profiles (shared priors with provenance).
+OMLS 0.8: Driver sandbox / VFIO-UIO userspace stub (probe + dry-run claim).
 `)
 }
 
@@ -1206,12 +1354,28 @@ Usage:
   omls agent run [flags]
   omls agent register [flags]
   omls agent envelope [validate|show|apply]
+  omls agent sandbox [probe|list|claim]
 
 Commands:
   discover   Probe sysfs/proc and write an RDL Machine Profile
   run        Discover, register, advertise, heartbeat, and execute work
   register   One-shot register + advertise + heartbeat
   envelope   Validate/show/apply a Resource Envelope (0.4)
+  sandbox    VFIO/UIO sandbox probe and dry-run claim (0.8)
+`
+}
+
+func sandboxUsage() string {
+	return `omls agent sandbox — VFIO/UIO sandbox stub (0.8)
+
+Usage:
+  omls agent sandbox probe [--sys-root DIR]
+  omls agent sandbox list [--sys-root DIR]
+  omls agent sandbox claim ID|--id ID [--sys-root DIR]
+
+Probe is best-effort against /sys and /dev. Typical cloud/lab VMs have no
+VFIO/UIO — OMLS warns and never crashes. claim is always simulated (no real
+driver bind/unbind).
 `
 }
 
@@ -1247,12 +1411,13 @@ func discoverUsage() string {
 	return `omls agent discover — write a Machine Profile (RDL v0)
 
 Usage:
-  omls agent discover [--out PATH] [--format yaml|json] [--quiet]
+  omls agent discover [--out PATH] [--format yaml|json] [--quiet] [--sandbox]
 
 Flags:
   --out, -o PATH     Output path (default: machine-profile.yaml)
   --format FORMAT    yaml or json (default: from --out suffix)
   --quiet, -q        Suppress warnings on stderr
+  --sandbox          Merge VFIO/UIO sandbox resources into the profile (0.8)
 `
 }
 

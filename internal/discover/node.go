@@ -77,7 +77,9 @@ func collectOS(root string) (rdl.OSInfo, []string) {
 	warns := []string{}
 	info := rdl.OSInfo{
 		Family: "linux",
-		Arch:   runtime.GOARCH,
+		// Prefer the uname-style machine string (x86_64/aarch64) so node.os.arch
+		// matches cpu0.attrs.arch. runtime.GOARCH (amd64/arm64) is Go's label.
+		Arch: machineArch(root),
 	}
 	if k, err := readTrim(pathJoin(root, "/proc/sys/kernel/osrelease")); err == nil {
 		info.Kernel = k
@@ -114,10 +116,12 @@ func collectOS(root string) (rdl.OSInfo, []string) {
 func detectVirt(root string) (string, []string) {
 	warns := []string{}
 
-	// WSL markers (interop, microsoft in version, WSLENV).
-	if fileExists(pathJoin(root, "/proc/sys/fs/binfmt_misc/WSLInterop")) ||
-		os.Getenv("WSL_DISTRO_NAME") != "" ||
-		os.Getenv("WSLENV") != "" {
+	// WSL markers from the inspected rootfs. Host env vars only count when
+	// discovering the live machine (empty SysRoot), not fixtures/chroots.
+	if fileExists(pathJoin(root, "/proc/sys/fs/binfmt_misc/WSLInterop")) {
+		return "wsl", warns
+	}
+	if root == "" && (os.Getenv("WSL_DISTRO_NAME") != "" || os.Getenv("WSLENV") != "") {
 		return "wsl", warns
 	}
 	if ver, err := readTrim(pathJoin(root, "/proc/version")); err == nil {

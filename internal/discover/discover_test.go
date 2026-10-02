@@ -117,6 +117,73 @@ func TestDetectWSLVirt(t *testing.T) {
 	}
 }
 
+func TestDiscoverFixtureNotTaggedWSLFromHostEnv(t *testing.T) {
+	t.Setenv("WSL_DISTRO_NAME", "Ubuntu")
+	t.Setenv("WSLENV", "1")
+
+	dir := t.TempDir()
+	mustWrite(t, filepath.Join(dir, "etc", "machine-id"), "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\n")
+	mustWrite(t, filepath.Join(dir, "etc", "os-release"), "PRETTY_NAME=\"Bare Fixture\"\n")
+	mustWrite(t, filepath.Join(dir, "proc", "sys", "kernel", "osrelease"), "6.1.0-fixture\n")
+	mustWrite(t, filepath.Join(dir, "proc", "cpuinfo"), "processor\t: 0\nmodel name\t: Fixture CPU\n")
+	mustWrite(t, filepath.Join(dir, "proc", "meminfo"), "MemTotal:       1024000 kB\nMemAvailable:    512000 kB\n")
+	mustMkdir(t, filepath.Join(dir, "sys", "class", "net"))
+	mustMkdir(t, filepath.Join(dir, "sys", "block"))
+	mustMkdir(t, filepath.Join(dir, "sys", "bus", "pci", "devices"))
+	mustMkdir(t, filepath.Join(dir, "sys", "bus", "usb", "devices"))
+	mustMkdir(t, filepath.Join(dir, "sys", "devices", "system", "cpu"))
+
+	res, err := discover.Discover(discover.Options{SysRoot: dir})
+	if err != nil {
+		t.Fatalf("Discover: %v", err)
+	}
+	if res.Document.Node.Virt == "wsl" {
+		t.Fatalf("fixture tagged wsl from host env")
+	}
+	if res.Document.Node.OS.Arch != res.Document.Resources[0].Attrs["arch"] {
+		t.Fatalf("os.arch=%q cpu.arch=%v", res.Document.Node.OS.Arch, res.Document.Resources[0].Attrs["arch"])
+	}
+}
+
+func TestCollectCPUMultiSocketCores(t *testing.T) {
+	dir := t.TempDir()
+	mustWrite(t, filepath.Join(dir, "etc", "machine-id"), "cccccccccccccccccccccccccccccccc\n")
+	mustWrite(t, filepath.Join(dir, "etc", "os-release"), "PRETTY_NAME=\"Dual Socket\"\n")
+	mustWrite(t, filepath.Join(dir, "proc", "sys", "kernel", "osrelease"), "6.1.0\n")
+	mustWrite(t, filepath.Join(dir, "proc", "cpuinfo"), ""+
+		"processor\t: 0\nphysical id\t: 0\ncore id\t: 0\ncpu cores\t: 2\nsiblings\t: 2\nmodel name\t: Dual\n\n"+
+		"processor\t: 1\nphysical id\t: 0\ncore id\t: 1\ncpu cores\t: 2\nsiblings\t: 2\n\n"+
+		"processor\t: 2\nphysical id\t: 1\ncore id\t: 0\ncpu cores\t: 2\nsiblings\t: 2\n\n"+
+		"processor\t: 3\nphysical id\t: 1\ncore id\t: 1\ncpu cores\t: 2\nsiblings\t: 2\n")
+	mustWrite(t, filepath.Join(dir, "proc", "meminfo"), "MemTotal:       1024000 kB\nMemAvailable:    512000 kB\n")
+	mustMkdir(t, filepath.Join(dir, "sys", "class", "net"))
+	mustMkdir(t, filepath.Join(dir, "sys", "block"))
+	mustMkdir(t, filepath.Join(dir, "sys", "bus", "pci", "devices"))
+	mustMkdir(t, filepath.Join(dir, "sys", "bus", "usb", "devices"))
+	mustMkdir(t, filepath.Join(dir, "sys", "devices", "system", "cpu"))
+
+	res, err := discover.Discover(discover.Options{SysRoot: dir})
+	if err != nil {
+		t.Fatalf("Discover: %v", err)
+	}
+	var cpu rdl.Resource
+	for _, r := range res.Document.Resources {
+		if r.ID == "cpu0" {
+			cpu = r
+			break
+		}
+	}
+	if cpu.Attrs["cores"] != 4 {
+		t.Fatalf("cores=%v want 4", cpu.Attrs["cores"])
+	}
+	if cpu.Attrs["sockets"] != 2 {
+		t.Fatalf("sockets=%v want 2", cpu.Attrs["sockets"])
+	}
+	if cpu.Attrs["logical_cpus"] != 4 {
+		t.Fatalf("logical_cpus=%v want 4", cpu.Attrs["logical_cpus"])
+	}
+}
+
 func mustWrite(t *testing.T, path, content string) {
 	t.Helper()
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {

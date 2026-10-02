@@ -1,0 +1,17 @@
+# Example power-fabric protocol messages (OMLS 0.9).
+# Each message carries schema_version: "0.9".
+
+hello:
+  schema_version: "0.9"
+  type: hello
+
+set_budget_example:
+  schema_version: "0.9"
+  type: set_budget
+  budget:
+    consumer_id: run-demo
+    rail_id: rail-12v
+    watts: 45
+    peak_watts: 70
+    source: envelope
+    notes: from eco envelope intensity

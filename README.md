@@ -17,7 +17,8 @@ This repository is **independent** of other company stacks.
 | **0.5** | Behavior Profiles + telemetry persistence | [delivery](docs/layers/0.5-behavior.md) |
 | **0.6** | Adaptive multi-signal scheduling + hysteresis | [delivery](docs/layers/0.6-adaptive.md) |
 | **0.7** | Community hardware profiles + priors | [delivery](docs/layers/0.7-community.md) |
-| **0.8** (this tree) | Driver sandbox / VFIO-UIO userspace stub | [delivery](docs/layers/0.8-sandbox.md) |
+| **0.8** | Driver sandbox / VFIO-UIO userspace stub | [delivery](docs/layers/0.8-sandbox.md) |
+| **0.9** (this tree) | Power Fabric / MCU protocol simulator | [delivery](docs/layers/0.9-power.md) |
 
 No kernel fork. No Popcorn. Userspace on stock Linux only.
 
@@ -211,6 +212,19 @@ Probe for VFIO/UIO and simulate sandbox claims (never binds real drivers):
 
 Typical cloud VMs print `backend=none` with a warning — that is expected and non-fatal.
 
+## Power Fabric (0.9)
+
+In-process MCU simulator with rails and soft budgets (no physical hardware):
+
+```bash
+./omls power show
+./omls power hello
+./omls power budget --watts 40 --consumer lab
+./omls power budget --preset eco --consumer demo
+```
+
+When `run-demo` is given `--preset` / `--envelope`, the master attaches a soft power budget derived from envelope intensity and mentions it in the policy note.
+
 ## Root vs non-root
 
 Most of 0.1/0.2 works as a normal user:
@@ -226,7 +240,7 @@ See [`schemas/rdl-v0.schema.json`](schemas/rdl-v0.schema.json) and [`docs/omls-p
 
 ## Docs
 
-- [`docs/omls-layers.md`](docs/omls-layers.md) — operational layer hierarchy (0.1→0.8)
+- [`docs/omls-layers.md`](docs/omls-layers.md) — operational layer hierarchy (0.1→0.9)
 - [`docs/layers/`](docs/layers/) — per-layer delivery notes
 - [`docs/omls-vision.md`](docs/omls-vision.md) — full architecture vision
 - [`docs/omls-plan-0.1-0.3.md`](docs/omls-plan-0.1-0.3.md) — implementation plan for 0.1–0.3

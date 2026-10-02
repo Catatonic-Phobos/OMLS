@@ -15,6 +15,7 @@ import (
 	"github.com/Catatonic-Phobos/OMLS/internal/behavior"
 	"github.com/Catatonic-Phobos/OMLS/internal/community"
 	"github.com/Catatonic-Phobos/OMLS/internal/graph"
+	"github.com/Catatonic-Phobos/OMLS/internal/power"
 	"github.com/Catatonic-Phobos/OMLS/internal/rdl"
 	omlsv1 "github.com/Catatonic-Phobos/OMLS/proto/omls/v1"
 	"google.golang.org/grpc"
@@ -25,7 +26,7 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-const Version = "0.8.0"
+const Version = "0.9.0"
 
 // Server hosts the Fabric API against an in-memory Resource Graph.
 type Server struct {
@@ -33,6 +34,7 @@ type Server struct {
 	reg            *graph.Registry
 	store          *behavior.Store
 	community      *community.Catalog
+	power          *power.Simulator
 	heartbeatEvery time.Duration
 	version        string
 	demo           *demoState
@@ -62,6 +64,7 @@ func NewServerFull(reg *graph.Registry, heartbeatEvery time.Duration, store *beh
 		reg:            reg,
 		store:          store,
 		community:      cat,
+		power:          power.NewSimulator(),
 		heartbeatEvery: heartbeatEvery,
 		version:        Version,
 		demo:           newDemoState(),
@@ -74,6 +77,9 @@ func (s *Server) Store() *behavior.Store { return s.store }
 
 // Community exposes the community catalog (may be nil).
 func (s *Server) Community() *community.Catalog { return s.community }
+
+// Power exposes the simulated power fabric MCU (0.9).
+func (s *Server) Power() *power.Simulator { return s.power }
 
 // Registry exposes the backing graph (for tests / local dumps).
 func (s *Server) Registry() *graph.Registry { return s.reg }

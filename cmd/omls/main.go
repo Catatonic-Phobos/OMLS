@@ -17,6 +17,7 @@ import (
 	"github.com/Catatonic-Phobos/OMLS/internal/fabric"
 	"github.com/Catatonic-Phobos/OMLS/internal/fabric/tlsconfig"
 	"github.com/Catatonic-Phobos/OMLS/internal/graph"
+	"github.com/Catatonic-Phobos/OMLS/internal/power"
 	"github.com/Catatonic-Phobos/OMLS/internal/rdl"
 	"github.com/Catatonic-Phobos/OMLS/internal/sandbox"
 	omlsv1 "github.com/Catatonic-Phobos/OMLS/proto/omls/v1"
@@ -24,7 +25,7 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-const version = "0.8.0"
+const version = "0.9.0"
 
 func main() {
 	if len(os.Args) < 2 {
@@ -39,6 +40,8 @@ func main() {
 		err = runMaster(os.Args[2:])
 	case "community":
 		err = runCommunity(os.Args[2:])
+	case "power":
+		err = runPower(os.Args[2:])
 	case "version", "--version", "-V":
 		fmt.Printf("omls %s\n", version)
 	case "help", "-h", "--help":
@@ -1281,6 +1284,172 @@ func communityImport(args []string) error {
 	return nil
 }
 
+func runPower(args []string) error {
+	if len(args) < 1 {
+		return fmt.Errorf("expected power subcommand (show|hello|budget)")
+	}
+	switch args[0] {
+	case "show":
+		return powerShow(args[1:])
+	case "hello":
+		return powerHello(args[1:])
+	case "budget":
+		return powerBudget(args[1:])
+	case "help", "-h", "--help":
+		fmt.Print(powerUsage())
+		return nil
+	default:
+		return fmt.Errorf("unknown power subcommand %q", args[0])
+	}
+}
+
+func powerShow(args []string) error {
+	for _, a := range args {
+		if a == "-h" || a == "--help" {
+			fmt.Print(powerUsage())
+			return nil
+		}
+		return fmt.Errorf("unknown flag %q", a)
+	}
+	sim := power.NewSimulator()
+	st := sim.Handle(power.Message{Type: power.MsgStatus, SchemaVersion: power.SchemaVersion}).State
+	if st == nil {
+		return fmt.Errorf("no state")
+	}
+	for _, w := range st.Warnings {
+		fmt.Fprintf(os.Stderr, "warning: %s\n", w)
+	}
+	raw, err := power.MarshalStateYAML(*st)
+	if err != nil {
+		return err
+	}
+	_, err = os.Stdout.Write(raw)
+	return err
+}
+
+func powerHello(args []string) error {
+	for _, a := range args {
+		if a == "-h" || a == "--help" {
+			fmt.Print(powerUsage())
+			return nil
+		}
+		return fmt.Errorf("unknown flag %q", a)
+	}
+	sim := power.NewSimulator()
+	resp := sim.Handle(power.Message{Type: power.MsgHello, SchemaVersion: power.SchemaVersion})
+	raw, err := yaml.Marshal(resp)
+	if err != nil {
+		return err
+	}
+	_, err = os.Stdout.Write(raw)
+	return err
+}
+
+func powerBudget(args []string) error {
+	consumer := "cli"
+	rail := "rail-12v"
+	watts := 40.0
+	envelopeFile := ""
+	envelopePreset := ""
+	for i := 0; i < len(args); i++ {
+		a := args[i]
+		switch {
+		case a == "--consumer":
+			i++
+			if i >= len(args) {
+				return fmt.Errorf("--consumer requires id")
+			}
+			consumer = args[i]
+		case strings.HasPrefix(a, "--consumer="):
+			consumer = strings.TrimPrefix(a, "--consumer=")
+		case a == "--rail":
+			i++
+			if i >= len(args) {
+				return fmt.Errorf("--rail requires id")
+			}
+			rail = args[i]
+		case strings.HasPrefix(a, "--rail="):
+			rail = strings.TrimPrefix(a, "--rail=")
+		case a == "--watts":
+			i++
+			if i >= len(args) {
+				return fmt.Errorf("--watts requires a number")
+			}
+			if _, err := fmt.Sscanf(args[i], "%f", &watts); err != nil {
+				return fmt.Errorf("invalid --watts")
+			}
+		case strings.HasPrefix(a, "--watts="):
+			if _, err := fmt.Sscanf(strings.TrimPrefix(a, "--watts="), "%f", &watts); err != nil {
+				return fmt.Errorf("invalid --watts")
+			}
+		case a == "--envelope":
+			i++
+			if i >= len(args) {
+				return fmt.Errorf("--envelope requires a path")
+			}
+			envelopeFile = args[i]
+		case strings.HasPrefix(a, "--envelope="):
+			envelopeFile = strings.TrimPrefix(a, "--envelope=")
+		case a == "--preset":
+			i++
+			if i >= len(args) {
+				return fmt.Errorf("--preset requires a name")
+			}
+			envelopePreset = args[i]
+		case strings.HasPrefix(a, "--preset="):
+			envelopePreset = strings.TrimPrefix(a, "--preset=")
+		case a == "-h" || a == "--help":
+			fmt.Print(powerUsage())
+			return nil
+		default:
+			return fmt.Errorf("unknown flag %q", a)
+		}
+	}
+	sim := power.NewSimulator()
+	var b power.Budget
+	switch {
+	case envelopeFile != "" || envelopePreset != "":
+		var envYAML []byte
+		var err error
+		if envelopeFile != "" {
+			env, err2 := envelope.LoadFile(envelopeFile)
+			if err2 != nil {
+				return err2
+			}
+			envYAML, err = env.MarshalYAML()
+		} else {
+			env, err2 := envelope.Preset(envelopePreset)
+			if err2 != nil {
+				return err2
+			}
+			envYAML, err = env.MarshalYAML()
+		}
+		if err != nil {
+			return err
+		}
+		intensity := power.IntensityFromEnvelopeYAML(envYAML)
+		b = power.EnvelopeBudgetHint(consumer, intensity, sim.State().TotalBudgetW, 0)
+		b.RailID = rail
+	default:
+		b = power.Budget{ConsumerID: consumer, RailID: rail, Watts: watts, PeakWatts: watts * 1.4, Source: "manual"}
+	}
+	resp := sim.Handle(power.Message{Type: power.MsgSetBudget, SchemaVersion: power.SchemaVersion, Budget: &b})
+	if !resp.OK {
+		return fmt.Errorf("%s", resp.Error)
+	}
+	for _, w := range resp.State.Warnings {
+		fmt.Fprintf(os.Stderr, "warning: %s\n", w)
+	}
+	fmt.Printf("ok budget consumer=%s rail=%s watts=%.1f peak=%.1f source=%s\n",
+		b.ConsumerID, b.RailID, b.Watts, b.PeakWatts, b.Source)
+	raw, err := power.MarshalStateYAML(*resp.State)
+	if err != nil {
+		return err
+	}
+	_, err = os.Stdout.Write(raw)
+	return err
+}
+
 func runMasterHealth(args []string) error {
 	tlsF, rest, err := parseTLSFlags(args)
 	if err != nil {
@@ -1340,9 +1509,10 @@ Usage:
   omls master profiles list|show --master HOST:PORT [...]
   omls master run-demo --master HOST:PORT [--workers 8] [--preset eco] [--policy ewma|adaptive]
   omls community list|show|import [--dir DIR]
+  omls power show|hello|budget
   omls version
 
-OMLS 0.8: Driver sandbox / VFIO-UIO userspace stub (probe + dry-run claim).
+OMLS 0.9: Physical Power Fabric / MCU simulator (rails, budgets, envelope hints).
 `)
 }
 
@@ -1472,6 +1642,21 @@ Usage:
 Default --dir resolves to the first existing of: community/, profiles/, examples/community/.
 Import validates YAML and copies into --dir. Master --community-dir applies matching
 priors on AdvertiseProfile when the node has no local Behavior observations yet.
+`
+}
+
+func powerUsage() string {
+	return `omls power — Physical Power Fabric / MCU simulator (0.9)
+
+Usage:
+  omls power show
+  omls power hello
+  omls power budget [--consumer ID] [--rail rail-12v] [--watts N]
+  omls power budget --preset eco|--envelope FILE [--consumer ID]
+
+No real MCU hardware. show/hello talk to an in-process simulator.
+budget can derive soft watt hints from Resource Envelopes (0.4).
+Master run-demo attaches envelope budgets to its in-process fabric when --preset/--envelope is set.
 `
 }
 

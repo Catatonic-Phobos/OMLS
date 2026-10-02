@@ -8,6 +8,7 @@ import (
 
 	"github.com/Catatonic-Phobos/OMLS/internal/graph"
 	"github.com/Catatonic-Phobos/OMLS/internal/learn"
+	"github.com/Catatonic-Phobos/OMLS/internal/power"
 	"github.com/Catatonic-Phobos/OMLS/internal/schedule"
 	omlsv1 "github.com/Catatonic-Phobos/OMLS/proto/omls/v1"
 	"google.golang.org/grpc/codes"
@@ -165,6 +166,21 @@ func (s *Server) RunDemo(ctx context.Context, req *omlsv1.RunDemoRequest) (*omls
 			}
 		}
 	}
+	var powerNote string
+	if s.power != nil && len(envYAML) > 0 {
+		intensity := power.IntensityFromEnvelopeYAML(envYAML)
+		st := s.power.State()
+		b := power.EnvelopeBudgetHint("run-demo", intensity, st.TotalBudgetW, 0)
+		ack := s.power.Handle(power.Message{Type: power.MsgSetBudget, SchemaVersion: power.SchemaVersion, Budget: &b})
+		if ack.OK {
+			powerNote = fmt.Sprintf("power: budget %.1fW peak %.1fW on %s (envelope intensity=%.2f)", b.Watts, b.PeakWatts, b.RailID, intensity)
+		} else {
+			powerNote = "power: budget attach failed: " + ack.Error
+		}
+	} else if s.power != nil {
+		st := s.power.State()
+		powerNote = fmt.Sprintf("power: simulator online total_budget=%.0fW draw=%.1fW rails=%d", st.TotalBudgetW, st.TotalDrawW, len(st.Rails))
+	}
 	var alloc schedule.Allocation
 	var policy string
 	resp := &omlsv1.RunDemoResponse{}
@@ -186,12 +202,15 @@ func (s *Server) RunDemo(ctx context.Context, req *omlsv1.RunDemoRequest) (*omls
 				return nil, status.Errorf(codes.FailedPrecondition, "schedule: %v", err)
 			}
 			policy = fmt.Sprintf("initial proportional split by scheduler score (policy=%s)", policyName)
+			if powerNote != "" {
+				policy = policy + "; " + powerNote
+			}
 		} else if policyName == learn.PolicyAdaptive {
 			signals := signalsFromSnapshot(snap.Nodes, cap, s.localHostname)
 			alloc, policy = plane.AdaptiveAdjust(alloc, signals, learn.AdaptiveOptions{
 				Weights:          learn.DefaultAdaptiveWeights(),
 				ThermalCeiling:   ceiling,
-				CooldownRounds:    2,
+				CooldownRounds:   2,
 				MinScoreDelta:    0.12,
 				MaxMovesPerRound: 1,
 				EnvelopeCost:     envelopeCost,
@@ -305,6 +324,10 @@ func (s *Server) RunDemo(ctx context.Context, req *omlsv1.RunDemoRequest) (*omls
 	}
 
 	resp.Summary = summarizeDemo(resp)
+	if s.power != nil {
+		st := s.power.State()
+		resp.Summary += fmt.Sprintf("; power_draw=%.1fW budgets=%d", st.TotalDrawW, len(st.Budgets))
+	}
 	return resp, nil
 }
 

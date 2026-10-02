@@ -1,6 +1,6 @@
 # OMLS Plan — 0.1 → 0.3
 
-Status: **0.1–0.8 on main** · hierarchy: [omls-layers.md](omls-layers.md) · next: 0.9 power fabric  
+Status: **0.1–0.9 on main** · hierarchy: [omls-layers.md](omls-layers.md) · next: 1.0 integration milestone  
 Date: 2026-10-02
 
 ## Locked decisions
@@ -42,7 +42,7 @@ Success looks like:
 | Adaptive scheduling beyond simple stats | 0.6 (landed) |
 | Community hardware profiles | 0.7 (landed) |
 | Driver sandbox / VFIO-UIO | 0.8 (landed) |
-| Physical Power Fabric / MCU | 0.9+ |
+| Physical Power Fabric / MCU | 0.9 (landed) |
 | Ollama / Language Plane | after 1.0 infra (documented future) |
 | Popcorn-like cross-ISA process migration | research track only |
 

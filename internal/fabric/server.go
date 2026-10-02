@@ -5,12 +5,14 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/hex"
+	"encoding/json"
 	"fmt"
 	"io"
 	"net"
 	"os"
 	"time"
 
+	"github.com/Catatonic-Phobos/OMLS/internal/behavior"
 	"github.com/Catatonic-Phobos/OMLS/internal/graph"
 	"github.com/Catatonic-Phobos/OMLS/internal/rdl"
 	omlsv1 "github.com/Catatonic-Phobos/OMLS/proto/omls/v1"
@@ -19,34 +21,48 @@ import (
 	"google.golang.org/grpc/credentials"
 	"google.golang.org/grpc/credentials/insecure"
 	"google.golang.org/grpc/status"
+	"gopkg.in/yaml.v3"
 )
 
-const Version = "0.4.0"
+const Version = "0.5.0"
 
 // Server hosts the Fabric API against an in-memory Resource Graph.
 type Server struct {
 	omlsv1.UnimplementedFabricServer
 	reg            *graph.Registry
+	store          *behavior.Store
 	heartbeatEvery time.Duration
 	version        string
 	demo           *demoState
 	localHostname  string
 }
 
-// NewServer wraps a registry.
+// NewServer wraps a registry. dataDir may be empty (defaults to omls-data).
 func NewServer(reg *graph.Registry, heartbeatEvery time.Duration) *Server {
+	return NewServerWithStore(reg, heartbeatEvery, nil)
+}
+
+// NewServerWithStore is like NewServer but uses an existing Behavior Profile store.
+func NewServerWithStore(reg *graph.Registry, heartbeatEvery time.Duration, store *behavior.Store) *Server {
 	if heartbeatEvery <= 0 {
 		heartbeatEvery = 5 * time.Second
+	}
+	if store == nil {
+		store, _ = behavior.Open("omls-data")
 	}
 	host, _ := os.Hostname()
 	return &Server{
 		reg:            reg,
+		store:          store,
 		heartbeatEvery: heartbeatEvery,
 		version:        Version,
 		demo:           newDemoState(),
 		localHostname:  host,
 	}
 }
+
+// Store exposes the Behavior Profile store (tests / CLI local dumps).
+func (s *Server) Store() *behavior.Store { return s.store }
 
 // Registry exposes the backing graph (for tests / local dumps).
 func (s *Server) Registry() *graph.Registry { return s.reg }
@@ -74,6 +90,17 @@ func (s *Server) Heartbeat(ctx context.Context, req *omlsv1.HeartbeatRequest) (*
 	ok, reAdv := s.reg.Heartbeat(req.GetNodeId(), req.GetSessionId(), tel)
 	if !ok {
 		return nil, status.Error(codes.FailedPrecondition, "node not registered or session mismatch")
+	}
+	if tel != nil && s.store != nil {
+		host, virt := s.nodeMeta(req.GetNodeId())
+		_ = s.store.RecordTelemetry(req.GetNodeId(), host, virt, behavior.TelemetrySample{
+			ObservedAt:        tel.ObservedAt,
+			CPULoad:           tel.CPULoad,
+			MemAvailableBytes: tel.MemAvailableBytes,
+			MemTotalBytes:     tel.MemTotalBytes,
+			TemperatureC:      tel.TemperatureC,
+			TemperatureKnown:  tel.TemperatureKnown,
+		})
 	}
 	return &omlsv1.HeartbeatResponse{Ok: true, ReAdvertise: reAdv}, nil
 }
@@ -109,6 +136,17 @@ func (s *Server) StreamTelemetry(stream omlsv1.Fabric_StreamTelemetryServer) err
 		if err := s.reg.RecordTelemetry(sample.GetNodeId(), sample.GetSessionId(), tel); err != nil {
 			return status.Errorf(codes.FailedPrecondition, "%v", err)
 		}
+		if s.store != nil {
+			host, virt := s.nodeMeta(sample.GetNodeId())
+			_ = s.store.RecordTelemetry(sample.GetNodeId(), host, virt, behavior.TelemetrySample{
+				ObservedAt:        tel.ObservedAt,
+				CPULoad:           tel.CPULoad,
+				MemAvailableBytes: tel.MemAvailableBytes,
+				MemTotalBytes:     tel.MemTotalBytes,
+				TemperatureC:      tel.TemperatureC,
+				TemperatureKnown:  tel.TemperatureKnown,
+			})
+		}
 		accepted++
 	}
 }
@@ -130,6 +168,80 @@ func (s *Server) GetGraph(ctx context.Context, _ *omlsv1.GetGraphRequest) (*omls
 		return nil, status.Errorf(codes.Internal, "marshal graph: %v", err)
 	}
 	return &omlsv1.GetGraphResponse{GraphYaml: raw}, nil
+}
+
+func (s *Server) ListProfiles(ctx context.Context, _ *omlsv1.ListProfilesRequest) (*omlsv1.ListProfilesResponse, error) {
+	if s.store == nil {
+		return &omlsv1.ListProfilesResponse{}, nil
+	}
+	list, err := s.store.List()
+	if err != nil {
+		return nil, status.Errorf(codes.Internal, "list profiles: %v", err)
+	}
+	out := &omlsv1.ListProfilesResponse{DataDir: s.store.Dir()}
+	for _, p := range list {
+		sum := &omlsv1.ProfileSummary{
+			NodeId:    p.NodeID,
+			Hostname:  p.Hostname,
+			Virt:      p.Virt,
+			UpdatedAt: p.UpdatedAt.UTC().Format(time.RFC3339),
+		}
+		for _, r := range p.Resources {
+			if r.Class == "compute" || r.ID == "cpu0" {
+				sum.Samples = int32(r.Observed.Samples)
+				sum.DurationEwmaMs = r.Observed.DurationEWMAMs
+				sum.Confidence = r.Confidence
+				break
+			}
+		}
+		out.Profiles = append(out.Profiles, sum)
+	}
+	return out, nil
+}
+
+func (s *Server) GetProfile(ctx context.Context, req *omlsv1.GetProfileRequest) (*omlsv1.GetProfileResponse, error) {
+	if req.GetNodeId() == "" {
+		return nil, status.Error(codes.InvalidArgument, "node_id is required")
+	}
+	if s.store == nil {
+		return nil, status.Error(codes.FailedPrecondition, "behavior store unavailable")
+	}
+	p, err := s.store.Load(req.GetNodeId())
+	if err != nil {
+		return nil, status.Errorf(codes.Internal, "load profile: %v", err)
+	}
+	if p.UpdatedAt.IsZero() && len(p.Resources) == 0 && len(p.RecentTelemetry) == 0 {
+		return nil, status.Errorf(codes.NotFound, "no behavior profile for %s", req.GetNodeId())
+	}
+	raw, err := yaml.Marshal(p)
+	if err != nil {
+		return nil, status.Errorf(codes.Internal, "marshal profile: %v", err)
+	}
+	tailN := int(req.GetTelemetryTail())
+	samples, err := s.store.ReadTelemetryTail(req.GetNodeId(), tailN)
+	if err != nil {
+		return nil, status.Errorf(codes.Internal, "telemetry: %v", err)
+	}
+	var jsonl []byte
+	for _, sample := range samples {
+		line, err := json.Marshal(sample)
+		if err != nil {
+			continue
+		}
+		jsonl = append(jsonl, line...)
+		jsonl = append(jsonl, '\n')
+	}
+	return &omlsv1.GetProfileResponse{ProfileYaml: raw, TelemetryJsonl: jsonl}, nil
+}
+
+func (s *Server) nodeMeta(nodeID string) (hostname, virt string) {
+	snap := s.reg.Snapshot()
+	for _, n := range snap.Nodes {
+		if n.ID == nodeID {
+			return n.Hostname, n.Virt
+		}
+	}
+	return "", ""
 }
 
 func parseProfile(format string, raw []byte) (*rdl.Document, error) {
@@ -170,6 +282,8 @@ type ServeOptions struct {
 	TLS      credentials.TransportCredentials // nil => insecure (dev-only)
 	Registry *graph.Registry
 	Interval time.Duration
+	DataDir  string // Behavior Profiles + telemetry (default omls-data)
+	Store    *behavior.Store
 }
 
 // ListenAndServe starts the fabric master until ctx is cancelled.
@@ -179,6 +293,14 @@ func ListenAndServe(ctx context.Context, opt ServeOptions) error {
 	}
 	if opt.Registry == nil {
 		return fmt.Errorf("registry is required")
+	}
+	store := opt.Store
+	if store == nil {
+		var err error
+		store, err = behavior.Open(opt.DataDir)
+		if err != nil {
+			return fmt.Errorf("behavior store: %w", err)
+		}
 	}
 	lis, err := net.Listen("tcp", opt.Listen)
 	if err != nil {
@@ -191,7 +313,7 @@ func ListenAndServe(ctx context.Context, opt ServeOptions) error {
 		serverOpts = append(serverOpts, grpc.Creds(opt.TLS))
 	}
 	gs := grpc.NewServer(serverOpts...)
-	omlsv1.RegisterFabricServer(gs, NewServer(opt.Registry, opt.Interval))
+	omlsv1.RegisterFabricServer(gs, NewServerWithStore(opt.Registry, opt.Interval, store))
 
 	errCh := make(chan error, 1)
 	go func() {

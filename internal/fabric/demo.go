@@ -156,6 +156,13 @@ func (s *Server) RunDemo(ctx context.Context, req *omlsv1.RunDemoRequest) (*omls
 	}()
 
 	plane := learn.New(0.3, ceiling)
+	if s.store != nil {
+		if seed, err := s.store.SeedPlaneStats(); err == nil {
+			for id, st := range seed {
+				plane.Seed(id, st.Duration, st.TempDelta, st.Samples)
+			}
+		}
+	}
 	var alloc schedule.Allocation
 	var policy string
 	resp := &omlsv1.RunDemoResponse{}
@@ -230,6 +237,16 @@ func (s *Server) RunDemo(ctx context.Context, req *omlsv1.RunDemoRequest) (*omls
 				known = true
 			}
 			plane.Observe(id, avg, td, known)
+			if s.store != nil {
+				host, virt := "", ""
+				for _, node := range snap.Nodes {
+					if node.ID == id {
+						host, virt = node.Hostname, node.Virt
+						break
+					}
+				}
+				_ = s.store.ObserveWork(id, host, virt, "cpu0", avg, td, known)
+			}
 		}
 
 		candByID := map[string]schedule.Candidate{}

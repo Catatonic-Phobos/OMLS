@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/Catatonic-Phobos/OMLS/internal/behavior"
 	"github.com/Catatonic-Phobos/OMLS/internal/fabric"
 	"github.com/Catatonic-Phobos/OMLS/internal/fabric/tlsconfig"
 	"github.com/Catatonic-Phobos/OMLS/internal/graph"
@@ -20,12 +21,16 @@ import (
 
 func TestFabricInsecureTwoAgents(t *testing.T) {
 	reg := graph.New(200 * time.Millisecond)
+	store, err := behavior.Open(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
 	lis, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
 		t.Fatal(err)
 	}
 	gs := grpc.NewServer()
-	omlsv1.RegisterFabricServer(gs, fabric.NewServer(reg, 50*time.Millisecond))
+	omlsv1.RegisterFabricServer(gs, fabric.NewServerWithStore(reg, 50*time.Millisecond, store))
 	go gs.Serve(lis) //nolint:errcheck
 	defer gs.Stop()
 
@@ -108,12 +113,16 @@ func TestFabricMTLS(t *testing.T) {
 	}
 
 	reg := graph.New(time.Second)
+	store, err := behavior.Open(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
 	lis, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
 		t.Fatal(err)
 	}
 	gs := grpc.NewServer(grpc.Creds(credentials.NewTLS(serverTLS)))
-	omlsv1.RegisterFabricServer(gs, fabric.NewServer(reg, time.Second))
+	omlsv1.RegisterFabricServer(gs, fabric.NewServerWithStore(reg, time.Second, store))
 	go gs.Serve(lis) //nolint:errcheck
 	defer gs.Stop()
 

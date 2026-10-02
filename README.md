@@ -11,7 +11,8 @@ This repository is **independent** of other company stacks.
 | **0.1** | `omls agent discover` → Machine Profile (RDL v0) |
 | **0.2** | Multi-node fabric (gRPC + mTLS) + in-memory Resource Graph |
 | **0.3** | Resource Graph scheduler + EWMA learning demo (`run-demo`) |
-| **0.4** (this tree) | Resource Envelopes (attack/peak/sustain/release) |
+| **0.4** | Resource Envelopes (attack/peak/sustain/release) |
+| **0.5** (this tree) | Behavior Profiles + telemetry persistence |
 
 No kernel fork. No Popcorn. Userspace on stock Linux only.
 
@@ -73,7 +74,7 @@ omls agent run      ← discover + register + heartbeat
 
 ```bash
 # terminal 1
-./omls master serve --listen 127.0.0.1:7443 --insecure
+./omls master serve --listen 127.0.0.1:7443 --insecure --data-dir ./omls-data
 
 # terminal 2 (node A)
 ./omls agent run --master 127.0.0.1:7443 --insecure
@@ -142,6 +143,30 @@ Backends (best-effort, never crash if missing):
 
 If temperature crosses `limits.thermal_max_c`, the controller clamps the level and records a warning.
 
+## Behavior Profiles (0.5)
+
+The master persists per-node **Behavior Profiles** and a short telemetry history under `--data-dir` (default `omls-data/`):
+
+```text
+omls-data/
+  profiles/<node>.yaml     # EWMA duration/temp, confidence, recent samples
+  telemetry/<node>.jsonl   # append-only heartbeat/stream history
+```
+
+Heartbeats and `StreamTelemetry` append samples; `run-demo` ObserveWork updates duration/temp-delta EWMAs and seeds the Learning Plane on the next demo.
+
+```bash
+./omls master serve --listen 127.0.0.1:7443 --insecure --data-dir ./omls-data
+# … agents + optional run-demo …
+
+./omls master profiles list --master 127.0.0.1:7443 --insecure
+./omls master profiles show --master 127.0.0.1:7443 --insecure --node <node-id>
+./omls master profiles show --master 127.0.0.1:7443 --insecure --node <node-id> \
+  --out behavior.yaml --telemetry-out samples.jsonl --telemetry-tail 50
+```
+
+gRPC: `ListProfiles` / `GetProfile`. Confidence grows with samples (`1 - e^(-n/20)`).
+
 ## Root vs non-root
 
 Most of 0.1/0.2 works as a normal user:
@@ -157,6 +182,8 @@ See [`schemas/rdl-v0.schema.json`](schemas/rdl-v0.schema.json) and [`docs/omls-p
 
 ## Docs
 
+- [`docs/omls-layers.md`](docs/omls-layers.md) — operational layer hierarchy (0.1→0.5)
+- [`docs/layers/`](docs/layers/) — per-layer delivery notes
 - [`docs/omls-vision.md`](docs/omls-vision.md) — full architecture vision
 - [`docs/omls-plan-0.1-0.3.md`](docs/omls-plan-0.1-0.3.md) — implementation plan for 0.1–0.3
 - [`docs/omls-handoff-catatonic.md`](docs/omls-handoff-catatonic.md) — handoff notes

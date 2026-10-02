@@ -77,6 +77,18 @@ func (p *Plane) DurationEWMA(nodeID string) float64 {
 	return 0
 }
 
+// Seed installs prior stats (e.g. from persisted Behavior Profiles) before a demo.
+func (p *Plane) Seed(nodeID string, durationEWMA, tempDeltaEWMA float64, samples int) {
+	if samples <= 0 {
+		return
+	}
+	p.nodes[nodeID] = &Stats{
+		DurationEWMA:  durationEWMA,
+		TempDeltaEWMA: tempDeltaEWMA,
+		Samples:       samples,
+	}
+}
+
 // Adjust shifts workers toward faster / cooler nodes. Returns new allocation and reasons.
 func (p *Plane) Adjust(prev schedule.Allocation, capacity map[string]int, tempNow map[string]float64, tempKnown map[string]bool) (schedule.Allocation, string) {
 	next := schedule.Allocation{}

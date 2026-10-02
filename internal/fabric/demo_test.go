@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/Catatonic-Phobos/OMLS/internal/behavior"
 	"github.com/Catatonic-Phobos/OMLS/internal/fabric"
 	"github.com/Catatonic-Phobos/OMLS/internal/graph"
 	"github.com/Catatonic-Phobos/OMLS/internal/rdl"
@@ -16,7 +17,11 @@ import (
 
 func TestRunDemoTwoSimulatedWorkers(t *testing.T) {
 	reg := graph.New(time.Minute)
-	srv := fabric.NewServer(reg, time.Second)
+	store, err := behavior.Open(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	srv := fabric.NewServerWithStore(reg, time.Second, store)
 	lis, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
 		t.Fatal(err)

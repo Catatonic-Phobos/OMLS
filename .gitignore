@@ -11,6 +11,7 @@ machine-profile.json
 *.profile.yaml
 *.profile.json
 graph.yaml
+/omls-data/
 
 # Dev mTLS materials
 /dev-certs/

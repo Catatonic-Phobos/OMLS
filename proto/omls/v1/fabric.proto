@@ -32,6 +32,12 @@ service Fabric {
 
   // RunDemo runs the 0.3 parallel_workers learning demo on the master.
   rpc RunDemo(RunDemoRequest) returns (RunDemoResponse);
+
+  // ListProfiles returns persisted Behavior Profiles (OMLS 0.5).
+  rpc ListProfiles(ListProfilesRequest) returns (ListProfilesResponse);
+
+  // GetProfile returns one Behavior Profile and optional telemetry tail.
+  rpc GetProfile(GetProfileRequest) returns (GetProfileResponse);
 }
 
 message RegisterRequest {
@@ -171,4 +177,31 @@ message DemoRound {
 message RunDemoResponse {
   repeated DemoRound rounds = 1;
   string summary = 2;
+}
+
+message ListProfilesRequest {}
+
+message ProfileSummary {
+  string node_id = 1;
+  string hostname = 2;
+  string virt = 3;
+  string updated_at = 4;
+  int32 samples = 5;
+  double duration_ewma_ms = 6;
+  double confidence = 7;
+}
+
+message ListProfilesResponse {
+  repeated ProfileSummary profiles = 1;
+  string data_dir = 2;
+}
+
+message GetProfileRequest {
+  string node_id = 1;
+  int32 telemetry_tail = 2; // last N samples; 0 = default 20
+}
+
+message GetProfileResponse {
+  bytes profile_yaml = 1;
+  bytes telemetry_jsonl = 2; // optional tail as JSON lines
 }

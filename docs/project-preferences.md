@@ -1,6 +1,7 @@
 # Project preferences (learned)
 
 - 2026-10-02: Work lands on `main` by default for this experimental phase — no PR/merge gate unless asked. Cloud agents push commits directly to `main`.
+- 2026-10-02: **Layered versions on main:** `main` is always the cumulative functional stack. Each OMLS version (0.1, 0.2, …) is a reviewable layer — prefer one PR (or one `feat(0.N):` commit) per layer, with docs under `docs/layers/`. Do not split main into non-runnable version branches as the source of truth.
 - 2026-10-02: OMLS base = stock Linux userspace only for 0.1–1.0 — no new kernel, no Popcorn/Stramash runtime dependency, no Linux fork unless userspace later proves a hard limit.
 - 2026-10-02: Prototype stack = `omls-agent` + fabric (gRPC/mTLS) + `omls-master` Resource Graph/scheduler; statistical learning (EWMA/regression) before ML models or local LLM.
 - 2026-10-02: OMLS lives in a **new dedicated git repo**, fully separate from KEEP-Up (company stack; unrelated to this project). Never scaffold OMLS inside the KEEP-Up workspace.

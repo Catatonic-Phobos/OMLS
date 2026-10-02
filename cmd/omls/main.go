@@ -21,7 +21,7 @@ import (
 	"google.golang.org/grpc/credentials"
 )
 
-const version = "0.4.0"
+const version = "0.5.0"
 
 func main() {
 	if len(os.Args) < 2 {
@@ -72,7 +72,7 @@ func runAgent(args []string) error {
 
 func runMaster(args []string) error {
 	if len(args) < 1 {
-		return fmt.Errorf("expected subcommand (serve|graph|health)")
+		return fmt.Errorf("expected subcommand (serve|graph|health|profiles|run-demo)")
 	}
 	switch args[0] {
 	case "serve":
@@ -81,6 +81,8 @@ func runMaster(args []string) error {
 		return runMasterGraph(args[1:])
 	case "health":
 		return runMasterHealth(args[1:])
+	case "profiles":
+		return runMasterProfiles(args[1:])
 	case "run-demo":
 		return runMasterDemo(args[1:])
 	case "help", "-h", "--help":
@@ -301,6 +303,7 @@ func runMasterServe(args []string) error {
 	listen := ":7443"
 	hbTimeout := 15 * time.Second
 	interval := 5 * time.Second
+	dataDir := "omls-data"
 	for i := 0; i < len(rest); i++ {
 		a := rest[i]
 		switch {
@@ -340,6 +343,14 @@ func runMasterServe(args []string) error {
 			if err != nil {
 				return err
 			}
+		case a == "--data-dir":
+			i++
+			if i >= len(rest) {
+				return fmt.Errorf("--data-dir requires a path")
+			}
+			dataDir = rest[i]
+		case strings.HasPrefix(a, "--data-dir="):
+			dataDir = strings.TrimPrefix(a, "--data-dir=")
 		case a == "-h" || a == "--help":
 			fmt.Print(masterServeUsage())
 			return nil
@@ -355,13 +366,14 @@ func runMasterServe(args []string) error {
 	reg := graph.New(hbTimeout)
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
-	fmt.Fprintf(os.Stderr, "omls master: listening on %s (insecure=%v heartbeat-timeout=%s)\n",
-		listen, tlsF.insecure, hbTimeout)
+	fmt.Fprintf(os.Stderr, "omls master: listening on %s (insecure=%v heartbeat-timeout=%s data-dir=%s)\n",
+		listen, tlsF.insecure, hbTimeout, dataDir)
 	return fabric.ListenAndServe(ctx, fabric.ServeOptions{
 		Listen:   listen,
 		TLS:      creds,
 		Registry: reg,
 		Interval: interval,
+		DataDir:  dataDir,
 	})
 }
 
@@ -751,6 +763,208 @@ func short(id string) string {
 	return id[:8]
 }
 
+func runMasterProfiles(args []string) error {
+	if len(args) < 1 {
+		return fmt.Errorf("expected profiles subcommand (list|show)")
+	}
+	switch args[0] {
+	case "list":
+		return runMasterProfilesList(args[1:])
+	case "show":
+		return runMasterProfilesShow(args[1:])
+	case "help", "-h", "--help":
+		fmt.Print(masterProfilesUsage())
+		return nil
+	default:
+		return fmt.Errorf("unknown profiles subcommand %q", args[0])
+	}
+}
+
+func runMasterProfilesList(args []string) error {
+	tlsF, rest, err := parseTLSFlags(args)
+	if err != nil {
+		return err
+	}
+	master := "127.0.0.1:7443"
+	for i := 0; i < len(rest); i++ {
+		a := rest[i]
+		switch {
+		case a == "--master":
+			i++
+			if i >= len(rest) {
+				return fmt.Errorf("--master requires host:port")
+			}
+			master = rest[i]
+		case strings.HasPrefix(a, "--master="):
+			master = strings.TrimPrefix(a, "--master=")
+		case a == "-h" || a == "--help":
+			fmt.Print(masterProfilesUsage())
+			return nil
+		default:
+			return fmt.Errorf("unknown flag %q", a)
+		}
+	}
+	creds, err := tlsF.clientCreds()
+	if err != nil {
+		return err
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	conn, client, err := fabric.Dial(ctx, fabric.DialOptions{Addr: master, TLS: creds, Timeout: 5 * time.Second})
+	if err != nil {
+		return err
+	}
+	defer conn.Close()
+	resp, err := client.ListProfiles(ctx, &omlsv1.ListProfilesRequest{})
+	if err != nil {
+		return err
+	}
+	if resp.GetDataDir() != "" {
+		fmt.Fprintf(os.Stderr, "data_dir=%s profiles=%d\n", resp.GetDataDir(), len(resp.GetProfiles()))
+	}
+	if len(resp.GetProfiles()) == 0 {
+		fmt.Println("(no behavior profiles yet)")
+		return nil
+	}
+	fmt.Printf("%-36s %-16s %-8s %8s %12s %10s %s\n",
+		"NODE_ID", "HOSTNAME", "VIRT", "SAMPLES", "EWMA_MS", "CONF", "UPDATED")
+	for _, p := range resp.GetProfiles() {
+		fmt.Printf("%-36s %-16s %-8s %8d %12.1f %10.3f %s\n",
+			p.GetNodeId(), truncate(p.GetHostname(), 16), p.GetVirt(),
+			p.GetSamples(), p.GetDurationEwmaMs(), p.GetConfidence(), p.GetUpdatedAt())
+	}
+	return nil
+}
+
+func runMasterProfilesShow(args []string) error {
+	tlsF, rest, err := parseTLSFlags(args)
+	if err != nil {
+		return err
+	}
+	master := "127.0.0.1:7443"
+	nodeID := ""
+	out := ""
+	telOut := ""
+	tail := int32(20)
+	for i := 0; i < len(rest); i++ {
+		a := rest[i]
+		switch {
+		case a == "--master":
+			i++
+			if i >= len(rest) {
+				return fmt.Errorf("--master requires host:port")
+			}
+			master = rest[i]
+		case strings.HasPrefix(a, "--master="):
+			master = strings.TrimPrefix(a, "--master=")
+		case a == "--node":
+			i++
+			if i >= len(rest) {
+				return fmt.Errorf("--node requires a node id")
+			}
+			nodeID = rest[i]
+		case strings.HasPrefix(a, "--node="):
+			nodeID = strings.TrimPrefix(a, "--node=")
+		case a == "--out" || a == "-o":
+			i++
+			if i >= len(rest) {
+				return fmt.Errorf("%s requires a path", a)
+			}
+			out = rest[i]
+		case strings.HasPrefix(a, "--out="):
+			out = strings.TrimPrefix(a, "--out=")
+		case a == "--telemetry-out":
+			i++
+			if i >= len(rest) {
+				return fmt.Errorf("--telemetry-out requires a path")
+			}
+			telOut = rest[i]
+		case strings.HasPrefix(a, "--telemetry-out="):
+			telOut = strings.TrimPrefix(a, "--telemetry-out=")
+		case a == "--telemetry-tail":
+			i++
+			if i >= len(rest) {
+				return fmt.Errorf("--telemetry-tail requires an int")
+			}
+			n, err := parseInt(rest[i])
+			if err != nil {
+				return err
+			}
+			tail = int32(n)
+		case strings.HasPrefix(a, "--telemetry-tail="):
+			n, err := parseInt(strings.TrimPrefix(a, "--telemetry-tail="))
+			if err != nil {
+				return err
+			}
+			tail = int32(n)
+		case a == "-h" || a == "--help":
+			fmt.Print(masterProfilesUsage())
+			return nil
+		default:
+			if nodeID == "" && !strings.HasPrefix(a, "-") {
+				nodeID = a
+				continue
+			}
+			return fmt.Errorf("unknown flag %q", a)
+		}
+	}
+	if nodeID == "" {
+		return fmt.Errorf("--node is required")
+	}
+	creds, err := tlsF.clientCreds()
+	if err != nil {
+		return err
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	conn, client, err := fabric.Dial(ctx, fabric.DialOptions{Addr: master, TLS: creds, Timeout: 5 * time.Second})
+	if err != nil {
+		return err
+	}
+	defer conn.Close()
+	resp, err := client.GetProfile(ctx, &omlsv1.GetProfileRequest{NodeId: nodeID, TelemetryTail: tail})
+	if err != nil {
+		return err
+	}
+	if out != "" {
+		if err := os.MkdirAll(filepath.Dir(out), 0o755); err != nil && filepath.Dir(out) != "." {
+			return err
+		}
+		if err := os.WriteFile(out, resp.GetProfileYaml(), 0o644); err != nil {
+			return err
+		}
+		fmt.Fprintf(os.Stderr, "wrote %s (%d bytes)\n", out, len(resp.GetProfileYaml()))
+	} else {
+		if _, err := os.Stdout.Write(resp.GetProfileYaml()); err != nil {
+			return err
+		}
+	}
+	if len(resp.GetTelemetryJsonl()) > 0 {
+		if telOut != "" {
+			if err := os.MkdirAll(filepath.Dir(telOut), 0o755); err != nil && filepath.Dir(telOut) != "." {
+				return err
+			}
+			if err := os.WriteFile(telOut, resp.GetTelemetryJsonl(), 0o644); err != nil {
+				return err
+			}
+			fmt.Fprintf(os.Stderr, "wrote telemetry %s (%d bytes)\n", telOut, len(resp.GetTelemetryJsonl()))
+		} else if out == "" {
+			fmt.Fprintln(os.Stderr, "--- telemetry (jsonl) ---")
+			if _, err := os.Stdout.Write(resp.GetTelemetryJsonl()); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
+func truncate(s string, n int) string {
+	if len(s) <= n {
+		return s
+	}
+	return s[:n-3] + "..."
+}
+
 func runMasterHealth(args []string) error {
 	tlsF, rest, err := parseTLSFlags(args)
 	if err != nil {
@@ -803,13 +1017,14 @@ Usage:
   omls agent run --master HOST:PORT [--ca --cert --key | --insecure]
   omls agent register --master HOST:PORT [...]
   omls agent envelope validate|show|apply [--preset NAME | --file PATH]
-  omls master serve [--listen :7443] [--ca --cert --key | --insecure]
+  omls master serve [--listen :7443] [--data-dir omls-data] [--ca --cert --key | --insecure]
   omls master graph --master HOST:PORT --out graph.yaml
   omls master health --master HOST:PORT
+  omls master profiles list|show --master HOST:PORT [...]
   omls master run-demo --master HOST:PORT [--workers 8] [--preset eco]
   omls version
 
-OMLS 0.4: discovery + fabric + scheduler/EWMA + Resource Envelopes.
+OMLS 0.5: Behavior Profiles + telemetry persistence on the master.
 `)
 }
 
@@ -878,7 +1093,21 @@ Usage:
   omls master serve [flags]
   omls master graph [flags]
   omls master health [flags]
+  omls master profiles list|show [flags]
   omls master run-demo [flags]
+`
+}
+
+func masterProfilesUsage() string {
+	return `omls master profiles — Behavior Profiles (0.5)
+
+Usage:
+  omls master profiles list --master HOST:PORT (--ca --cert --key | --insecure)
+  omls master profiles show --master HOST:PORT --node NODE_ID [--out profile.yaml]
+       [--telemetry-tail 20] [--telemetry-out samples.jsonl] (--ca --cert --key | --insecure)
+
+Profiles are written under the master's --data-dir (default omls-data) from
+heartbeats/telemetry and run-demo ObserveWork updates.
 `
 }
 
@@ -898,10 +1127,11 @@ func masterServeUsage() string {
 	return `omls master serve — run the fabric control plane
 
 Usage:
-  omls master serve [--listen :7443] [--heartbeat-timeout 15s] (--ca CA --cert CERT --key KEY | --insecure)
+  omls master serve [--listen :7443] [--data-dir omls-data] [--heartbeat-timeout 15s] (--ca CA --cert CERT --key KEY | --insecure)
 
 Flags:
   --listen ADDR              Bind address (default :7443)
+  --data-dir PATH            Behavior Profiles + telemetry store (default omls-data)
   --heartbeat-timeout DUR    Mark node unavailable after this silence (default 15s)
   --interval DUR             Suggested agent heartbeat interval (default 5s)
   --ca/--cert/--key          mTLS materials (server requires client certs)

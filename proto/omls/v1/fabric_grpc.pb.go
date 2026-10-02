@@ -28,6 +28,8 @@ const (
 	Fabric_ClaimWork_FullMethodName        = "/omls.v1.Fabric/ClaimWork"
 	Fabric_ReportWork_FullMethodName       = "/omls.v1.Fabric/ReportWork"
 	Fabric_RunDemo_FullMethodName          = "/omls.v1.Fabric/RunDemo"
+	Fabric_ListProfiles_FullMethodName     = "/omls.v1.Fabric/ListProfiles"
+	Fabric_GetProfile_FullMethodName       = "/omls.v1.Fabric/GetProfile"
 )
 
 // FabricClient is the client API for Fabric service.
@@ -54,6 +56,10 @@ type FabricClient interface {
 	ReportWork(ctx context.Context, in *ReportWorkRequest, opts ...grpc.CallOption) (*ReportWorkResponse, error)
 	// RunDemo runs the 0.3 parallel_workers learning demo on the master.
 	RunDemo(ctx context.Context, in *RunDemoRequest, opts ...grpc.CallOption) (*RunDemoResponse, error)
+	// ListProfiles returns persisted Behavior Profiles (OMLS 0.5).
+	ListProfiles(ctx context.Context, in *ListProfilesRequest, opts ...grpc.CallOption) (*ListProfilesResponse, error)
+	// GetProfile returns one Behavior Profile and optional telemetry tail.
+	GetProfile(ctx context.Context, in *GetProfileRequest, opts ...grpc.CallOption) (*GetProfileResponse, error)
 }
 
 type fabricClient struct {
@@ -157,6 +163,26 @@ func (c *fabricClient) RunDemo(ctx context.Context, in *RunDemoRequest, opts ...
 	return out, nil
 }
 
+func (c *fabricClient) ListProfiles(ctx context.Context, in *ListProfilesRequest, opts ...grpc.CallOption) (*ListProfilesResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(ListProfilesResponse)
+	err := c.cc.Invoke(ctx, Fabric_ListProfiles_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *fabricClient) GetProfile(ctx context.Context, in *GetProfileRequest, opts ...grpc.CallOption) (*GetProfileResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(GetProfileResponse)
+	err := c.cc.Invoke(ctx, Fabric_GetProfile_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // FabricServer is the server API for Fabric service.
 // All implementations must embed UnimplementedFabricServer
 // for forward compatibility.
@@ -181,6 +207,10 @@ type FabricServer interface {
 	ReportWork(context.Context, *ReportWorkRequest) (*ReportWorkResponse, error)
 	// RunDemo runs the 0.3 parallel_workers learning demo on the master.
 	RunDemo(context.Context, *RunDemoRequest) (*RunDemoResponse, error)
+	// ListProfiles returns persisted Behavior Profiles (OMLS 0.5).
+	ListProfiles(context.Context, *ListProfilesRequest) (*ListProfilesResponse, error)
+	// GetProfile returns one Behavior Profile and optional telemetry tail.
+	GetProfile(context.Context, *GetProfileRequest) (*GetProfileResponse, error)
 	mustEmbedUnimplementedFabricServer()
 }
 
@@ -217,6 +247,12 @@ func (UnimplementedFabricServer) ReportWork(context.Context, *ReportWorkRequest)
 }
 func (UnimplementedFabricServer) RunDemo(context.Context, *RunDemoRequest) (*RunDemoResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method RunDemo not implemented")
+}
+func (UnimplementedFabricServer) ListProfiles(context.Context, *ListProfilesRequest) (*ListProfilesResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method ListProfiles not implemented")
+}
+func (UnimplementedFabricServer) GetProfile(context.Context, *GetProfileRequest) (*GetProfileResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method GetProfile not implemented")
 }
 func (UnimplementedFabricServer) mustEmbedUnimplementedFabricServer() {}
 func (UnimplementedFabricServer) testEmbeddedByValue()                {}
@@ -390,6 +426,42 @@ func _Fabric_RunDemo_Handler(srv interface{}, ctx context.Context, dec func(inte
 	return interceptor(ctx, in, info, handler)
 }
 
+func _Fabric_ListProfiles_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ListProfilesRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(FabricServer).ListProfiles(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Fabric_ListProfiles_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(FabricServer).ListProfiles(ctx, req.(*ListProfilesRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _Fabric_GetProfile_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(GetProfileRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(FabricServer).GetProfile(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Fabric_GetProfile_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(FabricServer).GetProfile(ctx, req.(*GetProfileRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // Fabric_ServiceDesc is the grpc.ServiceDesc for Fabric service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -428,6 +500,14 @@ var Fabric_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "RunDemo",
 			Handler:    _Fabric_RunDemo_Handler,
+		},
+		{
+			MethodName: "ListProfiles",
+			Handler:    _Fabric_ListProfiles_Handler,
+		},
+		{
+			MethodName: "GetProfile",
+			Handler:    _Fabric_GetProfile_Handler,
 		},
 	},
 	Streams: []grpc.StreamDesc{

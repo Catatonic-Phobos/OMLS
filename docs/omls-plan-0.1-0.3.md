@@ -1,6 +1,6 @@
 # OMLS Plan — 0.1 → 0.3
 
-Status: **0.1–0.4 landed on main** · next: 0.5 Behavior Profiles / telemetry persistence  
+Status: **0.1–0.5 landed** (0.5 Behavior Profiles + telemetry persistence) · next: 0.6 adaptive scheduling beyond simple stats  
 Date: 2026-10-02
 
 ## Locked decisions
@@ -37,8 +37,8 @@ Success looks like:
 
 | Topic | Earliest |
 |---|---|
-| Resource Envelopes (attack/peak/sustain/release) | 0.4 |
-| Full Behavior Profiles persistence | 0.5 |
+| Resource Envelopes (attack/peak/sustain/release) | 0.4 (landed) |
+| Full Behavior Profiles persistence | 0.5 (landed) |
 | Adaptive scheduling beyond simple stats | 0.6 |
 | Community hardware profiles | 0.7 |
 | Driver sandbox / VFIO-UIO | 0.8 |

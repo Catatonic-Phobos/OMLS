@@ -3,6 +3,8 @@
 `main` is always the **cumulative functional stack**. Each version below is a **layer**: additive capability with a clear ownership boundary. Layers can be revisited or swapped later without rewriting the whole system.
 
 ```text
+1.0 Integration milestone (stable surface)
+  ↑
 0.9 Physical Power Fabric / MCU stub
   ↑
 0.8 Driver sandbox / VFIO-UIO stub
@@ -39,6 +41,7 @@ Policy: land each layer on `main` so the tree stays runnable; keep a PR (or comm
 | **0.7** | Community hardware priors | `internal/community`, `examples/community/`, `omls community`, master `--community-dir` | [note](layers/0.7-community.md) |
 | **0.8** | Driver sandbox stub | `internal/sandbox`, RDL `sandbox` class, `omls agent sandbox probe\|list\|claim` | [note](layers/0.8-sandbox.md) |
 | **0.9** | Power fabric simulator | `internal/power`, `omls power`, RunDemo envelope→budget | [note](layers/0.9-power.md) |
+| **1.0** | Integration milestone | version `1.0.0`, `TestStackSmoke1_0`, stable product surface | [note](layers/1.0-milestone.md) |
 
 ---
 
@@ -52,3 +55,4 @@ Policy: land each layer on `main` so the tree stays runnable; keep a PR (or comm
 6. Community profiles (0.7) are soft priors only — local Behavior observations always win.
 7. Sandbox (0.8) never loads kernel modules or binds devices; missing VFIO/UIO is a warning, not a failure.
 8. Power fabric (0.9) is simulated software budgets only — no physical MCU control.
+9. 1.0 freezes the userspace loop as the supported product surface; Language Plane / real MCU / migration remain future/research.

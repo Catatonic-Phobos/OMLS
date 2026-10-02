@@ -25,7 +25,7 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-const version = "0.9.0"
+const version = "1.0.0"
 
 func main() {
 	if len(os.Args) < 2 {
@@ -1512,7 +1512,7 @@ Usage:
   omls power show|hello|budget
   omls version
 
-OMLS 0.9: Physical Power Fabric / MCU simulator (rails, budgets, envelope hints).
+OMLS 1.0: Stable adaptive distributed resource stack (discover→fabric→schedule→learn).
 `)
 }
 

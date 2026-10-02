@@ -18,9 +18,10 @@ This repository is **independent** of other company stacks.
 | **0.6** | Adaptive multi-signal scheduling + hysteresis | [delivery](docs/layers/0.6-adaptive.md) |
 | **0.7** | Community hardware profiles + priors | [delivery](docs/layers/0.7-community.md) |
 | **0.8** | Driver sandbox / VFIO-UIO userspace stub | [delivery](docs/layers/0.8-sandbox.md) |
-| **0.9** (this tree) | Power Fabric / MCU protocol simulator | [delivery](docs/layers/0.9-power.md) |
+| **0.9** | Power Fabric / MCU protocol simulator | [delivery](docs/layers/0.9-power.md) |
+| **1.0** (this tree) | Integration milestone — stable adaptive stack | [delivery](docs/layers/1.0-milestone.md) |
 
-No kernel fork. No Popcorn. Userspace on stock Linux only.
+No kernel fork. No Popcorn. Userspace on stock Linux only. Version string: **`1.0.0`**.
 
 ## Build
 
@@ -225,6 +226,19 @@ In-process MCU simulator with rails and soft budgets (no physical hardware):
 
 When `run-demo` is given `--preset` / `--envelope`, the master attaches a soft power budget derived from envelope intensity and mentions it in the policy note.
 
+## 1.0 milestone
+
+`omls version` / fabric Health report `1.0.0`. The supported loop is:
+
+```text
+DISCOVER → DESCRIBE → REGISTER → SCHEDULE → ENVELOPE → OBSERVE → ADJUST
+         (+ community priors, sandbox probe, power budgets)
+```
+
+In-process smoke: `go test ./internal/fabric/ -run TestStackSmoke1_0`.
+
+**Documented future (not required):** Language Plane / Ollama, real MCU switching, Popcorn-like migration, real VFIO bind. See [`docs/layers/1.0-milestone.md`](docs/layers/1.0-milestone.md).
+
 ## Root vs non-root
 
 Most of 0.1/0.2 works as a normal user:
@@ -240,7 +254,7 @@ See [`schemas/rdl-v0.schema.json`](schemas/rdl-v0.schema.json) and [`docs/omls-p
 
 ## Docs
 
-- [`docs/omls-layers.md`](docs/omls-layers.md) — operational layer hierarchy (0.1→0.9)
+- [`docs/omls-layers.md`](docs/omls-layers.md) — operational layer hierarchy (0.1→1.0)
 - [`docs/layers/`](docs/layers/) — per-layer delivery notes
 - [`docs/omls-vision.md`](docs/omls-vision.md) — full architecture vision
 - [`docs/omls-plan-0.1-0.3.md`](docs/omls-plan-0.1-0.3.md) — implementation plan for 0.1–0.3

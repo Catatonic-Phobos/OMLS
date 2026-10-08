@@ -191,9 +191,14 @@ func runClusterDemo(args []string) error {
 	for _, r := range demo.Rounds {
 		fmt.Printf("\n=== round %d (%d ms) ===\n", r.Round, r.WallMs)
 		fmt.Printf("policy: %s\n", r.PolicyNote)
+		fmt.Printf("hosts: planned=%d executed=%d\n", r.PlannedHosts, r.ExecutedHosts)
 		for _, a := range r.Allocations {
-			fmt.Printf("  %-12s workers=%d score=%.1f virt=%s host=%s\n",
-				short(a.NodeID), a.Workers, a.Score, a.Virt, a.Hostname)
+			fn := a.Function
+			if fn == "" {
+				fn = "-"
+			}
+			fmt.Printf("  %-12s function=%s planned=%d executed=%d score=%.1f virt=%s host=%s\n",
+				short(a.NodeID), fn, a.Workers, a.Executed, a.Score, a.Virt, a.Hostname)
 			if a.Reason != "" {
 				fmt.Printf("             reason: %s\n", a.Reason)
 			}
@@ -469,12 +474,16 @@ The daemon asks the current coordinator. No master address is required.
 }
 
 func clusterDemoUsage() string {
-	return `omls run-demo — schedule work across the discovered cluster
+	return `omls run-demo — schedule work across fabric-joined nodes
 
 Usage:
   omls run-demo [--workers 8] [--iterations 3] [--work-iterations N]
-                [--device cpu|gpu] [--policy adaptive|ewma]
+                [--device cpu|gpu] [--policy adaptive|ewma|place]
                 [--preset eco | --envelope FILE] [--socket PATH]
+
+Only nodes that joined the fabric (status=joined) can execute work.
+LAN discovery alone is not enough. Policy "place" assigns distinct
+functions to different computers and reports planned vs executed hosts.
 
 The local daemon forwards the job to the current coordinator.
 `

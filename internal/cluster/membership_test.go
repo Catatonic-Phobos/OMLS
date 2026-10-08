@@ -67,16 +67,16 @@ func TestSweepMarksSilenceUnavailable(t *testing.T) {
 
 func TestFormatNodes(t *testing.T) {
 	text := FormatNodes([]NodeInfo{
-		{Name: "DESKTOP", OS: "Debian 13", Env: EnvLabel("wsl"), Status: StatusReady},
-		{Name: "MINT", OS: "Linux Mint", Env: EnvLabel("bare"), Status: StatusReady},
+		{Name: "DESKTOP", OS: "Debian 13", Env: EnvLabel("wsl"), Status: StatusJoined},
+		{Name: "MINT", OS: "Linux Mint", Env: EnvLabel("bare"), Status: StatusDiscovered},
 	})
-	for _, want := range []string{"NODE", "DESKTOP", "Debian 13", "WSL2", "MINT", "native", "ready"} {
+	for _, want := range []string{"NODE", "DESKTOP", "Debian 13", "WSL2", "MINT", "native", "joined", "discovered"} {
 		if !contains(text, want) {
 			t.Fatalf("missing %q in\n%s", want, text)
 		}
 	}
-	status := FormatStatus(Status{Running: true, Cluster: "active", Nodes: 2, Coordinator: "DESKTOP"})
-	for _, want := range []string{"OMLS: running", "Cluster: active", "Nodes: 2", "Coordinator: DESKTOP"} {
+	status := FormatStatus(Status{Running: true, Cluster: "active", Nodes: 2, Joined: 1, Discovered: 1, Coordinator: "DESKTOP"})
+	for _, want := range []string{"OMLS: running", "Cluster: active", "joined=1", "discovered=1", "Coordinator: DESKTOP"} {
 		if !contains(status, want) {
 			t.Fatalf("missing %q in\n%s", want, status)
 		}

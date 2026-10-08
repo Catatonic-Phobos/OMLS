@@ -31,8 +31,8 @@ func FormatStatus(s Status) string {
 	if coord == "" {
 		coord = "-"
 	}
-	return fmt.Sprintf("OMLS: %s\nCluster: %s\nNodes: %d\nCoordinator: %s\n",
-		state, cluster, s.Nodes, coord)
+	return fmt.Sprintf("OMLS: %s\nCluster: %s\nNodes: %d (joined=%d discovered=%d)\nCoordinator: %s\n",
+		state, cluster, s.Nodes, s.Joined, s.Discovered, coord)
 }
 
 // FormatNodes renders `omls nodes`.

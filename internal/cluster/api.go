@@ -12,7 +12,9 @@ import (
 	"time"
 
 	"github.com/Catatonic-Phobos/OMLS/internal/fabric"
+	"github.com/Catatonic-Phobos/OMLS/internal/graph"
 	omlsv1 "github.com/Catatonic-Phobos/OMLS/proto/omls/v1"
+	"gopkg.in/yaml.v3"
 )
 
 // Status is the local daemon summary used by `omls status`.
@@ -20,6 +22,8 @@ type Status struct {
 	Running       bool   `json:"running"`
 	Cluster       string `json:"cluster"`
 	Nodes         int    `json:"nodes"`
+	Joined        int    `json:"joined"`
+	Discovered    int    `json:"discovered"`
 	Coordinator   string `json:"coordinator"`
 	CoordinatorID string `json:"coordinator_id"`
 	Role          string `json:"role"`
@@ -33,6 +37,7 @@ type NodeInfo struct {
 	Name   string `json:"name"`
 	OS     string `json:"os"`
 	Env    string `json:"env"`
+	// Status is operator-facing: joined (fabric), discovered (LAN only), or unavailable.
 	Status string `json:"status"`
 	Addr   string `json:"addr,omitempty"`
 }
@@ -60,6 +65,8 @@ type DemoAllocation struct {
 	NodeID   string  `json:"node_id"`
 	Hostname string  `json:"hostname"`
 	Workers  int32   `json:"workers"`
+	Executed int32   `json:"executed"`
+	Function string  `json:"function,omitempty"`
 	Score    float64 `json:"score"`
 	Virt     string  `json:"virt"`
 	Reason   string  `json:"reason"`
@@ -72,6 +79,8 @@ type DemoRound struct {
 	PolicyNote     string             `json:"policy_note"`
 	Allocations    []DemoAllocation   `json:"allocations"`
 	DurationEwmaMs map[string]float64 `json:"duration_ewma_ms,omitempty"`
+	PlannedHosts   int32              `json:"planned_hosts"`
+	ExecutedHosts  int32              `json:"executed_hosts"`
 }
 
 // DemoResult is the coordinator's run-demo response.
@@ -132,7 +141,7 @@ func (d *Daemon) handleDemo(w http.ResponseWriter, r *http.Request) {
 }
 
 func (d *Daemon) viewStatus() Status {
-	members := d.members.Snapshot()
+	nodes := d.viewNodes()
 	coord, _ := d.members.Coordinator()
 	cluster := "forming"
 	if coord.NodeID != "" {
@@ -144,10 +153,21 @@ func (d *Daemon) viewStatus() Status {
 	if role == "" {
 		role = "electing"
 	}
+	joined, discovered := 0, 0
+	for _, n := range nodes {
+		switch n.Status {
+		case StatusJoined:
+			joined++
+		case StatusDiscovered:
+			discovered++
+		}
+	}
 	return Status{
 		Running:       true,
 		Cluster:       cluster,
-		Nodes:         len(members),
+		Nodes:         len(nodes),
+		Joined:        joined,
+		Discovered:    discovered,
 		Coordinator:   coord.Hostname,
 		CoordinatorID: coord.NodeID,
 		Role:          role,
@@ -158,16 +178,68 @@ func (d *Daemon) viewStatus() Status {
 
 func (d *Daemon) viewNodes() []NodeInfo {
 	snap := d.members.Snapshot()
+	joined := d.fabricJoinedIDs(context.Background())
 	out := make([]NodeInfo, 0, len(snap))
 	for _, m := range snap {
+		status := m.Status
+		if status == StatusReady {
+			if joined[m.NodeID] {
+				status = StatusJoined
+			} else {
+				status = StatusDiscovered
+			}
+		}
 		out = append(out, NodeInfo{
 			NodeID: m.NodeID,
 			Name:   m.Hostname,
 			OS:     m.OS,
 			Env:    EnvLabel(m.Virt),
-			Status: m.Status,
+			Status: status,
 			Addr:   m.Addr,
 		})
+	}
+	return out
+}
+
+// fabricJoinedIDs returns node IDs that are available in the coordinator Resource Graph.
+// LAN discovery alone is not enough — only fabric-registered agents can execute work.
+func (d *Daemon) fabricJoinedIDs(ctx context.Context) map[string]bool {
+	out := map[string]bool{}
+	d.mu.Lock()
+	reg := d.reg
+	role := d.roleName
+	dial := d.coordDial
+	d.mu.Unlock()
+	if role == "coordinator" && reg != nil {
+		return availableIDs(reg.Snapshot())
+	}
+	if dial == "" {
+		return out
+	}
+	ctx, cancel := context.WithTimeout(ctx, 2*time.Second)
+	defer cancel()
+	conn, client, err := fabric.Dial(ctx, fabric.DialOptions{Addr: dial, Timeout: 2 * time.Second})
+	if err != nil {
+		return out
+	}
+	defer conn.Close()
+	resp, err := client.GetGraph(ctx, &omlsv1.GetGraphRequest{})
+	if err != nil {
+		return out
+	}
+	var snap graph.Snapshot
+	if err := yaml.Unmarshal(resp.GetGraphYaml(), &snap); err != nil {
+		return out
+	}
+	return availableIDs(snap)
+}
+
+func availableIDs(snap graph.Snapshot) map[string]bool {
+	out := map[string]bool{}
+	for _, n := range snap.Nodes {
+		if n.Status == graph.StatusAvailable && n.ID != "" {
+			out[n.ID] = true
+		}
 	}
 	return out
 }
@@ -242,12 +314,16 @@ func (d *Daemon) runDemo(ctx context.Context, req DemoRequest) (DemoResult, erro
 			WallMs:         round.GetWallMs(),
 			PolicyNote:     round.GetPolicyNote(),
 			DurationEwmaMs: round.GetDurationEwmaMs(),
+			PlannedHosts:   round.GetPlannedHosts(),
+			ExecutedHosts:  round.GetExecutedHosts(),
 		}
 		for _, a := range round.GetAllocations() {
 			dr.Allocations = append(dr.Allocations, DemoAllocation{
 				NodeID:   a.GetNodeId(),
 				Hostname: a.GetHostname(),
 				Workers:  a.GetWorkers(),
+				Executed: a.GetExecuted(),
+				Function: a.GetFunction(),
 				Score:    a.GetScore(),
 				Virt:     a.GetVirt(),
 				Reason:   a.GetReason(),

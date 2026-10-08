@@ -47,7 +47,8 @@ func (d *MDNSDirectory) Announce(ctx context.Context, self Peer) error {
 		"os=" + self.OS,
 		"virt=" + self.Virt,
 		"addr=" + self.Host,
-		"cap=discover,execute,schedule",
+		// Discovery only. Execute/schedule require a fabric join; do not advertise them here.
+		"cap=discover",
 	}
 	server, err := zeroconf.Register(self.NodeID, ServiceType, "local.", self.Port, txt, nil)
 	if err != nil {

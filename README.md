@@ -20,9 +20,10 @@ This repository is **independent** of other company stacks.
 | **0.8** | Driver sandbox / VFIO-UIO userspace stub | [delivery](docs/layers/0.8-sandbox.md) |
 | **0.9** | Power Fabric / MCU protocol simulator | [delivery](docs/layers/0.9-power.md) |
 | **1.0** | Integration milestone — stable adaptive stack | [delivery](docs/layers/1.0-milestone.md) |
-| **1.1** (this tree) | Cluster autodiscovery — `omlsd`, LAN membership, elected coordinator | [delivery](docs/layers/1.1-cluster.md) |
+| **1.1** | Cluster autodiscovery — `omlsd`, LAN membership, elected coordinator | [delivery](docs/layers/1.1-cluster.md) |
+| **1.2** (this tree) | Honest membership + exclusive function placement across joined nodes | [delivery](docs/layers/1.2-honest-placement.md) |
 
-No kernel fork. No Popcorn. Userspace on stock Linux only. Version string: **`1.1.1`**.
+No kernel fork. No Popcorn. Userspace on stock Linux only. Version string: **`1.2.0`**.
 
 ## Build
 
@@ -158,6 +159,8 @@ omls run-demo --workers 4 --iterations 2 --policy adaptive
 
 `omls master serve` and `omls agent run --master HOST:PORT` stay available for debugging. Normal use does not need them. The daemon elects a temporary coordinator (lowest ready `node_id`). If that machine disappears, another node takes the role and the existing scheduler sees the nodes that are still up.
 
+`omls nodes` distinguishes **joined** (registered on the fabric and able to execute) from **discovered** (seen on the LAN only). Discovery is not division of work. `omls run-demo --policy place` places distinct functions on different joined computers and prints planned vs executed hosts.
+
 Identity is stored in the daemon data directory (`~/.local/share/omls/identity.yaml`, or `/var/lib/omls` for the systemd unit) and is reused after reboot.
 
 ### Install (git checkout)
@@ -285,7 +288,7 @@ When `run-demo` is given `--preset` / `--envelope`, the master attaches a soft p
 
 ## 1.0 milestone
 
-`omls version` / fabric Health report `1.1.1` on this tree (1.0.0 was the integration milestone). The supported loop is:
+`omls version` / fabric Health report `1.2.0` on this tree (1.0.0 was the integration milestone). The supported loop is:
 
 ```text
 DISCOVER → DESCRIBE → REGISTER → SCHEDULE → ENVELOPE → OBSERVE → ADJUST

@@ -130,6 +130,7 @@ func (s *Server) RunDemo(ctx context.Context, req *omlsv1.RunDemoRequest) (*omls
 	envYAML := req.GetEnvelopeYaml()
 	policyValue := strings.ToLower(strings.TrimSpace(req.GetPolicy()))
 	gpuMode := strings.HasPrefix(policyValue, "gpu-serial")
+	placeMode := false
 	if gpuMode && len(envYAML) > 0 {
 		return nil, status.Error(codes.InvalidArgument, "resource envelopes are not supported for GPU work yet")
 	}
@@ -137,12 +138,20 @@ func (s *Server) RunDemo(ctx context.Context, req *omlsv1.RunDemoRequest) (*omls
 		policyValue = strings.TrimPrefix(policyValue, "gpu-serial")
 		policyValue = strings.TrimPrefix(policyValue, ":")
 	}
+	switch policyValue {
+	case "place", "exclusive":
+		placeMode = true
+		policyValue = learn.PolicyAdaptive
+	}
 	policyName := learn.NormalizePolicy(policyValue)
 	function := "parallel_workers"
 	requires := []string{"compute", "parallelizable"}
 	if gpuMode {
 		function = "gpu_serial"
 		requires = []string{"graphics", "compute", "parallelizable"}
+	}
+	if placeMode && gpuMode {
+		return nil, status.Error(codes.InvalidArgument, "exclusive placement is CPU-only for now")
 	}
 	envelopeCost := learn.EnvelopeCostFromYAML(envYAML)
 	ceiling := req.GetThermalCeilingC()
@@ -198,6 +207,7 @@ func (s *Server) RunDemo(ctx context.Context, req *omlsv1.RunDemoRequest) (*omls
 		powerNote = fmt.Sprintf("power: simulator online total_budget=%.0fW draw=%.1fW rails=%d", st.TotalBudgetW, st.TotalDrawW, len(st.Rails))
 	}
 	var alloc schedule.Allocation
+	var placements []schedule.Placement
 	var policy string
 	resp := &omlsv1.RunDemoResponse{}
 
@@ -208,7 +218,33 @@ func (s *Server) RunDemo(ctx context.Context, req *omlsv1.RunDemoRequest) (*omls
 			return nil, status.Errorf(codes.FailedPrecondition, "%v", err)
 		}
 
-		if round == 1 {
+		funcByNode := map[string]string{}
+		if placeMode {
+			half := workers / 2
+			if half < 1 {
+				half = 1
+			}
+			other := workers - half
+			if other < 1 {
+				other = 1
+			}
+			placements, err = schedule.PlaceExclusive(snap.Nodes, []schedule.FuncRequest{
+				{Function: "parallel_workers", Requires: requires, Workers: half},
+				{Function: "memory_touch", Requires: requires, Workers: other},
+			}, schedule.Options{LocalHostname: s.localHostname, ThermalCeiling: ceiling})
+			if err != nil {
+				return nil, status.Errorf(codes.FailedPrecondition, "place: %v", err)
+			}
+			alloc = schedule.Allocation{}
+			for _, p := range placements {
+				alloc[p.NodeID] += p.Workers
+				funcByNode[p.NodeID] = p.Function
+			}
+			policy = fmt.Sprintf("exclusive function placement across distinct nodes (policy=place functions=%d)", len(placements))
+			if powerNote != "" {
+				policy = policy + "; " + powerNote
+			}
+		} else if round == 1 {
 			alloc, _, err = schedule.Plan(snap.Nodes, schedule.Request{
 				Function: function,
 				Requires: requires,
@@ -241,7 +277,12 @@ func (s *Server) RunDemo(ctx context.Context, req *omlsv1.RunDemoRequest) (*omls
 		if gpuMode {
 			gpuIndices = openCLIndices(snap.Nodes)
 		}
-		units := enqueueAlloc(alloc, workIters, workers, envYAML, function, gpuMode, gpuIndices)
+		var units []workUnit
+		if placeMode {
+			units = enqueuePlacements(placements, workIters, envYAML)
+		} else {
+			units = enqueueAlloc(alloc, workIters, workers, envYAML, function, gpuMode, gpuIndices)
+		}
 		s.demo.mu.Lock()
 		s.demo.queue = map[string][]workUnit{}
 		s.demo.pending = map[string]workUnit{}
@@ -261,6 +302,7 @@ func (s *Server) RunDemo(ctx context.Context, req *omlsv1.RunDemoRequest) (*omls
 		nodeDurN := map[string]int{}
 		nodeTempDelta := map[string]float64{}
 		nodeTempN := map[string]int{}
+		nodeExec := map[string]int{}
 
 		for got < expect {
 			select {
@@ -274,6 +316,7 @@ func (s *Server) RunDemo(ctx context.Context, req *omlsv1.RunDemoRequest) (*omls
 					}
 					continue
 				}
+				nodeExec[res.NodeID]++
 				nodeDurSum[res.NodeID] += float64(res.DurationMs)
 				nodeDurN[res.NodeID]++
 				if res.TempKnown {
@@ -308,6 +351,10 @@ func (s *Server) RunDemo(ctx context.Context, req *omlsv1.RunDemoRequest) (*omls
 		for _, c := range cands {
 			candByID[c.NodeID] = c
 		}
+		placeByID := map[string]schedule.Placement{}
+		for _, p := range placements {
+			placeByID[p.NodeID] = p
+		}
 		st := plane.Snapshot()
 		demoRound := &omlsv1.DemoRound{
 			Round:          int32(round),
@@ -320,12 +367,21 @@ func (s *Server) RunDemo(ctx context.Context, req *omlsv1.RunDemoRequest) (*omls
 			demoRound.DurationEwmaMs[id] = sstat.DurationEWMA
 			demoRound.TempDeltaEwma[id] = sstat.TempDeltaEWMA
 		}
+		plannedHosts := int32(0)
 		for id, w := range alloc {
 			if w == 0 {
 				continue
 			}
+			plannedHosts++
 			c := candByID[id]
-			host, virt := c.Hostname, c.Virt
+			host, virt, score, reason := c.Hostname, c.Virt, c.Score, c.Reason
+			fn := function
+			if p, ok := placeByID[id]; ok {
+				host, virt, score, reason = p.Hostname, p.Virt, p.Score, p.Reason
+				fn = p.Function
+			} else if fnName := funcByNode[id]; fnName != "" {
+				fn = fnName
+			}
 			if host == "" {
 				for _, n := range snap.Nodes {
 					if n.ID == id {
@@ -334,14 +390,23 @@ func (s *Server) RunDemo(ctx context.Context, req *omlsv1.RunDemoRequest) (*omls
 					}
 				}
 			}
+			exec := int32(nodeExec[id])
 			demoRound.Allocations = append(demoRound.Allocations, &omlsv1.NodeAllocation{
 				NodeId:   id,
 				Hostname: host,
 				Virt:     virt,
 				Workers:  int32(w),
-				Score:    c.Score,
-				Reason:   c.Reason,
+				Score:    score,
+				Reason:   reason,
+				Executed: exec,
+				Function: fn,
 			})
+		}
+		demoRound.PlannedHosts = plannedHosts
+		demoRound.ExecutedHosts = int32(len(nodeExec))
+		if demoRound.ExecutedHosts < demoRound.PlannedHosts {
+			demoRound.PolicyNote += fmt.Sprintf("; WARNING: planned_hosts=%d executed_hosts=%d — division was not fully realized",
+				demoRound.PlannedHosts, demoRound.ExecutedHosts)
 		}
 		resp.Rounds = append(resp.Rounds, demoRound)
 	}
@@ -434,6 +499,34 @@ func enqueueAlloc(alloc schedule.Allocation, workIters int64, totalWorkers int, 
 	return out
 }
 
+func enqueuePlacements(placements []schedule.Placement, workIters int64, envYAML []byte) []workUnit {
+	out := []workUnit{}
+	idx := int32(0)
+	total := 0
+	for _, p := range placements {
+		total += p.Workers
+	}
+	for _, p := range placements {
+		prefix := p.NodeID
+		if len(prefix) > 8 {
+			prefix = prefix[:8]
+		}
+		for i := 0; i < p.Workers; i++ {
+			out = append(out, workUnit{
+				ID:           fmt.Sprintf("w-%s-%s-%d", prefix, p.Function, idx),
+				Function:     p.Function,
+				Iterations:   workIters,
+				Index:        idx,
+				Count:        int32(total),
+				NodeID:       p.NodeID,
+				EnvelopeYAML: envYAML,
+			})
+			idx++
+		}
+	}
+	return out
+}
+
 func openCLIndices(nodes []graph.NodeEntry) map[string][]int {
 	indices := make(map[string][]int)
 	for _, node := range nodes {
@@ -487,14 +580,30 @@ func summarizeDemo(resp *omlsv1.RunDemoResponse) string {
 	}
 	first := resp.Rounds[0]
 	last := resp.Rounds[len(resp.Rounds)-1]
-	return fmt.Sprintf("rounds=%d first=%s last=%s policy=%q",
-		len(resp.Rounds), fmtAlloc(first), fmtAlloc(last), last.GetPolicyNote())
+	return fmt.Sprintf("rounds=%d first=%s last=%s executed=%s planned_hosts=%d executed_hosts=%d policy=%q",
+		len(resp.Rounds), fmtAlloc(first), fmtAlloc(last), fmtExecuted(last),
+		last.GetPlannedHosts(), last.GetExecutedHosts(), last.GetPolicyNote())
 }
 
 func fmtAlloc(r *omlsv1.DemoRound) string {
 	parts := make([]string, 0, len(r.GetAllocations()))
 	for _, a := range r.GetAllocations() {
-		parts = append(parts, fmt.Sprintf("%s:%d", shortID(a.GetNodeId()), a.GetWorkers()))
+		label := shortID(a.GetNodeId())
+		if fn := a.GetFunction(); fn != "" && fn != "parallel_workers" {
+			label = label + "/" + fn
+		}
+		parts = append(parts, fmt.Sprintf("%s:%d", label, a.GetWorkers()))
+	}
+	if len(parts) == 0 {
+		return "-"
+	}
+	return fmt.Sprint(parts)
+}
+
+func fmtExecuted(r *omlsv1.DemoRound) string {
+	parts := make([]string, 0, len(r.GetAllocations()))
+	for _, a := range r.GetAllocations() {
+		parts = append(parts, fmt.Sprintf("%s:%d", shortID(a.GetNodeId()), a.GetExecuted()))
 	}
 	if len(parts) == 0 {
 		return "-"

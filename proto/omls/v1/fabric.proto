@@ -162,9 +162,11 @@ message NodeAllocation {
   string node_id = 1;
   string hostname = 2;
   string virt = 3;
-  int32 workers = 4;
+  int32 workers = 4;   // planned workers
   double score = 5;
   string reason = 6;
+  int32 executed = 7;  // work units actually completed on this node
+  string function = 8; // function name when exclusive placement is used
 }
 
 message DemoRound {
@@ -174,6 +176,8 @@ message DemoRound {
   map<string, double> temp_delta_ewma = 4;
   string policy_note = 5;
   int64 wall_ms = 6;
+  int32 planned_hosts = 7;   // hosts with workers > 0 in the plan
+  int32 executed_hosts = 8;  // hosts that actually completed work
 }
 
 message RunDemoResponse {

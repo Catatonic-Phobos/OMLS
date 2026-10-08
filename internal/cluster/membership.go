@@ -8,8 +8,13 @@ import (
 )
 
 const (
-	// StatusReady is a live cluster member.
+	// StatusReady means the peer is live on the LAN (mDNS / membership).
+	// This is NOT proof that the peer joined the fabric or executes work.
 	StatusReady = "ready"
+	// StatusDiscovered is the operator-facing label for LAN presence without fabric join.
+	StatusDiscovered = "discovered"
+	// StatusJoined means the peer registered with the coordinator fabric and can claim work.
+	StatusJoined = "joined"
 	// StatusUnavailable is a member that disappeared and may return.
 	StatusUnavailable = "unavailable"
 )

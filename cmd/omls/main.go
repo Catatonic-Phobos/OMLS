@@ -27,7 +27,7 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-const version = "1.1.1"
+const version = "1.2.0"
 
 func main() {
 	if filepath.Base(os.Args[0]) == "omlsd" {

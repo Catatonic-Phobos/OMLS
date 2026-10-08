@@ -24,7 +24,7 @@ func TestDaemonsDiscoverAndFailOver(t *testing.T) {
 		return s.Role == "member" && s.Nodes == 2 && s.CoordinatorID == "a-node"
 	})
 	waitNodes(t, sockB, func(nodes []NodeInfo) bool {
-		return hasNode(nodes, "a-node", StatusReady) && hasNode(nodes, "b-node", StatusReady)
+		return hasNode(nodes, "a-node", StatusJoined) && hasNode(nodes, "b-node", StatusJoined)
 	})
 
 	waitGraph(t, sockA, "a-node", "b-node")
@@ -33,7 +33,7 @@ func TestDaemonsDiscoverAndFailOver(t *testing.T) {
 	defer cancel()
 	var demo DemoResult
 	err := PostJSON(ctx, sockB, "/v1/run-demo", DemoRequest{
-		Workers: 2, Iterations: 1, WorkIterations: 1000, Policy: "adaptive", TimeoutMs: 30_000,
+		Workers: 4, Iterations: 1, WorkIterations: 1000, Policy: "place", TimeoutMs: 30_000,
 	}, &demo)
 	if err != nil {
 		t.Fatal(err)
@@ -41,10 +41,39 @@ func TestDaemonsDiscoverAndFailOver(t *testing.T) {
 	if len(demo.Rounds) == 0 {
 		t.Fatal("run-demo returned no rounds")
 	}
+	round := demo.Rounds[0]
+	if round.PlannedHosts < 2 {
+		t.Fatalf("planned_hosts=%d, want >= 2 distinct computers", round.PlannedHosts)
+	}
+	if round.ExecutedHosts < 2 {
+		t.Fatalf("executed_hosts=%d summary=%q — work did not run on multiple machines", round.ExecutedHosts, demo.Summary)
+	}
+	funcs := map[string]string{}
+	for _, a := range round.Allocations {
+		if a.Executed < 1 {
+			t.Fatalf("node %s planned=%d executed=%d — allocation without execution", a.NodeID, a.Workers, a.Executed)
+		}
+		if a.Function != "" {
+			if other, ok := funcs[a.Function]; ok && other != a.NodeID {
+				t.Fatalf("function %s on both %s and %s", a.Function, other, a.NodeID)
+			}
+			funcs[a.Function] = a.NodeID
+		}
+	}
+	if len(funcs) < 2 {
+		t.Fatalf("expected distinct functions on distinct nodes, got %v", funcs)
+	}
+	hosts := map[string]bool{}
+	for _, id := range funcs {
+		hosts[id] = true
+	}
+	if len(hosts) < 2 {
+		t.Fatalf("functions were not separated across computers: %v", funcs)
+	}
 
 	stopA()
 	waitNodes(t, sockB, func(nodes []NodeInfo) bool {
-		return hasNode(nodes, "a-node", StatusUnavailable) && hasNode(nodes, "b-node", StatusReady)
+		return hasNode(nodes, "a-node", StatusUnavailable) && hasNode(nodes, "b-node", StatusJoined)
 	})
 	waitStatus(t, sockB, func(s Status) bool {
 		return s.Role == "coordinator" && s.CoordinatorID == "b-node"

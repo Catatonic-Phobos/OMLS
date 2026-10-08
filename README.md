@@ -174,6 +174,17 @@ omls nodes
 
 The older `omls-master` and `omls-agent` units are disabled by that script so they do not bind the same port. Their unit templates remain for manual lab use.
 
+### Update from GitHub (`omls update`)
+
+Field machines (USB stick, home PCs) can upgrade without cloning the repo:
+
+```bash
+omls update --check
+omls update
+```
+
+This downloads the latest `omls-linux-<arch>.tar.gz` from [GitHub Releases](https://github.com/Catatonic-Phobos/OMLS/releases) and runs the pack installer. Node identity is preserved. Releases must attach that tarball — build it with `./scripts/pack-release.sh`. A SanDisk image that predates this command needs **one** manual binary/pack install first; after that, `omls update` is enough. Details: [installation.md](docs/installation.md).
+
 **Release requirement:** the future compiled `.deb` installer must inspect the systems OMLS detects and automatically install and activate every required supported driver, library, service, and system configuration—not only GPU components. It must also install and enable the OMLS service(s) so they start at boot, while preserving per-machine configuration. See [installation and packaging requirements](docs/installation.md).
 
 ## Resource Envelopes (0.4)

@@ -1,6 +1,7 @@
 # Binaries
 /omls
 /bin/
+/dist/
 *.exe
 *.test
 *.out

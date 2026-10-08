@@ -6,6 +6,6 @@
 - [Plan 0.1→0.3](./omls-plan-0.1-0.3.md) — implementation plan
 - [Handoff](./omls-handoff-catatonic.md) — migration notes from the KEEP-Up-bound Project
 - [Preferences](./project-preferences.md) — locked decisions
-- [Installation](./installation.md) — current systemd bootstrap and future `.deb` release requirements
+- [Installation](./installation.md) — systemd bootstrap, `omls update` packs, and future `.deb` requirements
 
 Code lives at repo root (`cmd/omls`, `internal/*`, `proto/`, `schemas/`).

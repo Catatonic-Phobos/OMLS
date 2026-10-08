@@ -61,6 +61,8 @@ func main() {
 		err = runCommunity(os.Args[2:])
 	case "power":
 		err = runPower(os.Args[2:])
+	case "update":
+		err = runUpdate(os.Args[2:])
 	case "version", "--version", "-V":
 		fmt.Printf("omls %s\n", version)
 	case "help", "-h", "--help":
@@ -1568,6 +1570,7 @@ Usage:
   omls master run-demo --master HOST:PORT [--workers 8] [--preset eco] [--policy ewma|adaptive]
   omls community list|show|import [--dir DIR]
   omls power show|hello|budget
+  omls update [--check] [--force]
   omls version
 
 OMLS 1.1: nodes discover each other and form a cluster. master/agent remain for debug.

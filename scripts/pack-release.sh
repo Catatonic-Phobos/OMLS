@@ -18,10 +18,10 @@ echo "building ${goos}/${arch}…"
 CGO_ENABLED=0 GOOS="$goos" GOARCH="$arch" go build -trimpath -ldflags="-s -w" -o "$stage/omls" ./cmd/omls
 
 cp "$repo_root/scripts/systemd/omls.service.in" "$stage/omls.service.in"
-cp "$repo_root/scripts/pack/install.sh" "$stage/install.sh"
+# Pack ships the unified installer next to the binary (not the git wrapper).
+cp "$repo_root/scripts/install.sh" "$stage/install.sh"
 chmod 0755 "$stage/omls" "$stage/install.sh"
 
-# Record pack metadata for omls update.
 version="$("$stage/omls" version 2>/dev/null | awk '{print $2}')"
 if [[ -z "${version:-}" ]]; then
   version="unknown"

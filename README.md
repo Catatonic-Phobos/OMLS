@@ -22,7 +22,7 @@ This repository is **independent** of other company stacks.
 | **1.0** | Integration milestone — stable adaptive stack | [delivery](docs/layers/1.0-milestone.md) |
 | **1.1** (this tree) | Cluster autodiscovery — `omlsd`, LAN membership, elected coordinator | [delivery](docs/layers/1.1-cluster.md) |
 
-No kernel fork. No Popcorn. Userspace on stock Linux only. Version string: **`1.1.0`**.
+No kernel fork. No Popcorn. Userspace on stock Linux only. Version string: **`1.1.1`**.
 
 ## Build
 
@@ -160,30 +160,27 @@ omls run-demo --workers 4 --iterations 2 --policy adaptive
 
 Identity is stored in the daemon data directory (`~/.local/share/omls/identity.yaml`, or `/var/lib/omls` for the systemd unit) and is reused after reboot.
 
-### Start OMLS at boot with systemd
+### Install (git checkout)
 
-The repository currently has no `.deb` installer. For this checkout, the setup script builds OMLS, installs the Intel/AMD Mesa OpenCL runtime if needed, and enables `omls.service` at boot. The unit runs as the invoking user. Package and service installation may request administrator authentication.
+One command from the repo root (`~/OMLS`, not a nested clone):
 
 ```bash
-./scripts/install-systemd-services.sh
+./scripts/install.sh
 systemctl status omls
-journalctl -u omls -f
 omls status
 omls nodes
 ```
 
-The older `omls-master` and `omls-agent` units are disabled by that script so they do not bind the same port. Their unit templates remain for manual lab use.
+That builds, installs `/usr/local/bin/omls`, and enables `omls.service`. May ask for sudo. `scripts/install-systemd-services.sh` is the same entrypoint.
 
 ### Update from GitHub (`omls update`)
-
-Field machines (USB stick, home PCs) can upgrade without cloning the repo:
 
 ```bash
 omls update --check
 omls update
 ```
 
-This downloads the latest `omls-linux-<arch>.tar.gz` from [GitHub Releases](https://github.com/Catatonic-Phobos/OMLS/releases) and runs the pack installer. Node identity is preserved. Releases must attach that tarball — build it with `./scripts/pack-release.sh`. A SanDisk image that predates this command needs **one** manual binary/pack install first; after that, `omls update` is enough. Details: [installation.md](docs/installation.md).
+Downloads the latest `omls-linux-<arch>.tar.gz` from [GitHub Releases](https://github.com/Catatonic-Phobos/OMLS/releases) and installs it. Node identity is preserved. Maintainers: `./scripts/pack-release.sh` then attach the tarball to the release. Details: [installation.md](docs/installation.md).
 
 **Release requirement:** the future compiled `.deb` installer must inspect the systems OMLS detects and automatically install and activate every required supported driver, library, service, and system configuration—not only GPU components. It must also install and enable the OMLS service(s) so they start at boot, while preserving per-machine configuration. See [installation and packaging requirements](docs/installation.md).
 
@@ -288,7 +285,7 @@ When `run-demo` is given `--preset` / `--envelope`, the master attaches a soft p
 
 ## 1.0 milestone
 
-`omls version` / fabric Health report `1.1.0` on this tree (1.0.0 was the integration milestone). The supported loop is:
+`omls version` / fabric Health report `1.1.1` on this tree (1.0.0 was the integration milestone). The supported loop is:
 
 ```text
 DISCOVER → DESCRIBE → REGISTER → SCHEDULE → ENVELOPE → OBSERVE → ADJUST

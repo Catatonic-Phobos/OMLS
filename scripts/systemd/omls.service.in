@@ -1,0 +1,19 @@
+[Unit]
+Description=OMLS node
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=@OMLS_USER@
+ExecStart=/usr/local/bin/omls daemon --data-dir /var/lib/omls --socket /run/omls/omlsd.sock --listen :7443
+RuntimeDirectory=omls
+StateDirectory=omls
+StateDirectoryMode=0700
+Restart=on-failure
+RestartSec=5s
+UMask=0077
+NoNewPrivileges=true
+
+[Install]
+WantedBy=multi-user.target

@@ -3,10 +3,12 @@ package fabric
 import (
 	"context"
 	"fmt"
+	"os"
 	"time"
 
 	"github.com/Catatonic-Phobos/OMLS/internal/discover"
 	"github.com/Catatonic-Phobos/OMLS/internal/envelope"
+	"github.com/Catatonic-Phobos/OMLS/internal/gpu"
 	"github.com/Catatonic-Phobos/OMLS/internal/rdl"
 	"github.com/Catatonic-Phobos/OMLS/internal/telemetry"
 	"github.com/Catatonic-Phobos/OMLS/internal/work"
@@ -23,7 +25,8 @@ type AgentConfig struct {
 	WorkPoll     time.Duration
 	SysRoot      string
 	AgentVersion string
-	Once         bool // register+advertise+one heartbeat then exit
+	NodeID       string // overrides the discovered id when a cluster identity is persisted
+	Once         bool   // register+advertise+one heartbeat then exit
 }
 
 // Run discovers the local node, registers with the master, and heartbeats.
@@ -50,6 +53,7 @@ func Run(ctx context.Context, cfg AgentConfig) error {
 		return fmt.Errorf("discover: %w", err)
 	}
 	doc := res.Document
+	applyNodeID(&doc, cfg.NodeID)
 	nodeID := doc.Node.ID
 
 	reg, err := cfg.Client.Register(ctx, &omlsv1.RegisterRequest{
@@ -93,6 +97,7 @@ func Run(ctx context.Context, cfg AgentConfig) error {
 				return fmt.Errorf("re-discover: %w", derr)
 			}
 			doc = fresh.Document
+			applyNodeID(&doc, cfg.NodeID)
 			nodeID = doc.Node.ID
 			if err := advertise(ctx, cfg.Client, nodeID, session, &doc); err != nil {
 				return err
@@ -143,20 +148,35 @@ func claimAndRun(ctx context.Context, cfg AgentConfig, nodeID, session string) e
 		}
 		unit := claim.GetUnit()
 		before := telemetry.Sample(cfg.SysRoot)
-		pacer, stopEnv, envWarns := startEnvelope(ctx, unit.GetEnvelopeYaml(), cfg.SysRoot)
-		dur, burnErr := work.Burn(ctx, unit.GetIterations(), pacer)
-		if stopEnv != nil {
-			stopEnv()
+		var dur time.Duration
+		var burnErr error
+		if unit.GetFunction() == "gpu_serial" {
+			deviceIndex := int(unit.GetWorkerIndex())
+			devices, devErr := gpu.Devices()
+			if devErr != nil {
+				burnErr = devErr
+			} else if deviceIndex < 0 || deviceIndex >= len(devices) {
+				burnErr = fmt.Errorf("OpenCL GPU index %d unavailable (found %d)", deviceIndex, len(devices))
+			} else {
+				device := devices[deviceIndex]
+				dur, burnErr = gpu.Burn(deviceIndex, unit.GetIterations())
+				if burnErr == nil {
+					fmt.Fprintf(os.Stderr, "omls agent: GPU work %s complete device=%q operations=%d duration=%s\n",
+						unit.GetWorkId(), device.Name, unit.GetIterations(), dur.Round(time.Millisecond))
+				}
+			}
+		} else {
+			pacer, stopEnv, _ := startEnvelope(ctx, unit.GetEnvelopeYaml(), cfg.SysRoot)
+			dur, burnErr = work.Burn(ctx, unit.GetIterations(), pacer)
+			if stopEnv != nil {
+				stopEnv()
+			}
 		}
 		after := telemetry.Sample(cfg.SysRoot)
 		tempKnown := before.TemperatureKnown && after.TemperatureKnown
 		errText := ""
 		if burnErr != nil && ctx.Err() == nil {
 			errText = burnErr.Error()
-		}
-		if len(envWarns) > 0 && errText == "" {
-			// Keep result successful; envelope warnings are non-fatal.
-			_ = envWarns
 		}
 		_, err = cfg.Client.ReportWork(ctx, &omlsv1.ReportWorkRequest{
 			NodeId:           nodeID,
@@ -211,6 +231,13 @@ func startEnvelope(ctx context.Context, raw []byte, sysRoot string) (work.Pacer,
 	}
 	stop := func() { _, _ = ctrl.Stop() }
 	return pacer, stop, warns
+}
+
+func applyNodeID(doc *rdl.Document, id string) {
+	if doc == nil || id == "" {
+		return
+	}
+	doc.Node.ID = id
 }
 
 func advertise(ctx context.Context, client omlsv1.FabricClient, nodeID, session string, doc *rdl.Document) error {

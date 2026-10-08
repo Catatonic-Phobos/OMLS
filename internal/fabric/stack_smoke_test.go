@@ -28,8 +28,8 @@ import (
 // discover-like RDL → fabric → schedule → envelope → behavior → adaptive →
 // community prior → sandbox resource → power budget. No multi-host required.
 func TestStackSmoke1_0(t *testing.T) {
-	if fabric.Version != "1.0.0" {
-		t.Fatalf("fabric.Version=%s want 1.0.0", fabric.Version)
+	if fabric.Version != "1.1.0" {
+		t.Fatalf("fabric.Version=%s want 1.1.0", fabric.Version)
 	}
 
 	dir := t.TempDir()
@@ -141,7 +141,7 @@ priors:
 	if health.GetAvailableNodes() < 2 {
 		t.Fatalf("health=%+v", health)
 	}
-	if health.GetVersion() != "1.0.0" {
+	if health.GetVersion() != "1.1.0" {
 		t.Fatalf("health version=%s", health.GetVersion())
 	}
 

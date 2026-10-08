@@ -3,6 +3,7 @@ package fabric
 import (
 	"context"
 	"fmt"
+	"strings"
 	"sync"
 	"time"
 
@@ -127,7 +128,22 @@ func (s *Server) RunDemo(ctx context.Context, req *omlsv1.RunDemoRequest) (*omls
 		workIters = 3_000_000
 	}
 	envYAML := req.GetEnvelopeYaml()
-	policyName := learn.NormalizePolicy(req.GetPolicy())
+	policyValue := strings.ToLower(strings.TrimSpace(req.GetPolicy()))
+	gpuMode := strings.HasPrefix(policyValue, "gpu-serial")
+	if gpuMode && len(envYAML) > 0 {
+		return nil, status.Error(codes.InvalidArgument, "resource envelopes are not supported for GPU work yet")
+	}
+	if gpuMode {
+		policyValue = strings.TrimPrefix(policyValue, "gpu-serial")
+		policyValue = strings.TrimPrefix(policyValue, ":")
+	}
+	policyName := learn.NormalizePolicy(policyValue)
+	function := "parallel_workers"
+	requires := []string{"compute", "parallelizable"}
+	if gpuMode {
+		function = "gpu_serial"
+		requires = []string{"graphics", "compute", "parallelizable"}
+	}
 	envelopeCost := learn.EnvelopeCostFromYAML(envYAML)
 	ceiling := req.GetThermalCeilingC()
 	if ceiling <= 0 {
@@ -187,21 +203,21 @@ func (s *Server) RunDemo(ctx context.Context, req *omlsv1.RunDemoRequest) (*omls
 
 	for round := 1; round <= roundsN; round++ {
 		snap := s.reg.Snapshot()
-		cands, cap, err := planCandidates(snap.Nodes, workers, s.localHostname, ceiling)
+		cands, cap, err := planCandidates(snap.Nodes, workers, s.localHostname, ceiling, requires, function)
 		if err != nil {
 			return nil, status.Errorf(codes.FailedPrecondition, "%v", err)
 		}
 
 		if round == 1 {
 			alloc, _, err = schedule.Plan(snap.Nodes, schedule.Request{
-				Function: "parallel_workers",
-				Requires: []string{"compute", "parallelizable"},
+				Function: function,
+				Requires: requires,
 				Workers:  workers,
 			}, schedule.Options{LocalHostname: s.localHostname, ThermalCeiling: ceiling})
 			if err != nil {
 				return nil, status.Errorf(codes.FailedPrecondition, "schedule: %v", err)
 			}
-			policy = fmt.Sprintf("initial proportional split by scheduler score (policy=%s)", policyName)
+			policy = fmt.Sprintf("initial proportional split by scheduler score (device=%s policy=%s)", map[bool]string{true: "gpu-serial", false: "cpu"}[gpuMode], policyName)
 			if powerNote != "" {
 				policy = policy + "; " + powerNote
 			}
@@ -221,7 +237,11 @@ func (s *Server) RunDemo(ctx context.Context, req *omlsv1.RunDemoRequest) (*omls
 			alloc, policy = plane.Adjust(alloc, cap, tempNow, tempKnown)
 		}
 
-		units := enqueueAlloc(alloc, workIters, workers, envYAML)
+		gpuIndices := map[string][]int{}
+		if gpuMode {
+			gpuIndices = openCLIndices(snap.Nodes)
+		}
+		units := enqueueAlloc(alloc, workIters, workers, envYAML, function, gpuMode, gpuIndices)
 		s.demo.mu.Lock()
 		s.demo.queue = map[string][]workUnit{}
 		s.demo.pending = map[string]workUnit{}
@@ -249,6 +269,9 @@ func (s *Server) RunDemo(ctx context.Context, req *omlsv1.RunDemoRequest) (*omls
 			case res := <-s.demo.results:
 				got++
 				if res.Error != "" {
+					if gpuMode {
+						return nil, status.Errorf(codes.FailedPrecondition, "GPU work %s failed on node %s: %s", res.WorkID, res.NodeID, res.Error)
+					}
 					continue
 				}
 				nodeDurSum[res.NodeID] += float64(res.DurationMs)
@@ -269,7 +292,7 @@ func (s *Server) RunDemo(ctx context.Context, req *omlsv1.RunDemoRequest) (*omls
 				known = true
 			}
 			plane.Observe(id, avg, td, known)
-			if s.store != nil {
+			if s.store != nil && !gpuMode {
 				host, virt := "", ""
 				for _, node := range snap.Nodes {
 					if node.ID == id {
@@ -331,10 +354,10 @@ func (s *Server) RunDemo(ctx context.Context, req *omlsv1.RunDemoRequest) (*omls
 	return resp, nil
 }
 
-func planCandidates(nodes []graph.NodeEntry, workers int, localHost string, ceiling float64) ([]schedule.Candidate, map[string]int, error) {
+func planCandidates(nodes []graph.NodeEntry, workers int, localHost string, ceiling float64, requires []string, function string) ([]schedule.Candidate, map[string]int, error) {
 	_, cands, err := schedule.Plan(nodes, schedule.Request{
-		Function: "parallel_workers",
-		Requires: []string{"compute", "parallelizable"},
+		Function: function,
+		Requires: requires,
 		Workers:  workers,
 	}, schedule.Options{LocalHostname: localHost, ThermalCeiling: ceiling})
 	if err != nil {
@@ -380,7 +403,7 @@ func signalsFromSnapshot(nodes []graph.NodeEntry, cap map[string]int, localHost 
 	return out
 }
 
-func enqueueAlloc(alloc schedule.Allocation, workIters int64, totalWorkers int, envYAML []byte) []workUnit {
+func enqueueAlloc(alloc schedule.Allocation, workIters int64, totalWorkers int, envYAML []byte, function string, deviceSerial bool, deviceIndices map[string][]int) []workUnit {
 	out := []workUnit{}
 	idx := int32(0)
 	for nodeID, n := range alloc {
@@ -389,11 +412,18 @@ func enqueueAlloc(alloc schedule.Allocation, workIters int64, totalWorkers int, 
 			prefix = prefix[:8]
 		}
 		for i := 0; i < n; i++ {
+			workerIndex := idx
+			if deviceSerial {
+				workerIndex = int32(i)
+				if i < len(deviceIndices[nodeID]) {
+					workerIndex = int32(deviceIndices[nodeID][i])
+				}
+			}
 			out = append(out, workUnit{
 				ID:           fmt.Sprintf("w-%s-%d", prefix, idx),
-				Function:     "parallel_workers",
+				Function:     function,
 				Iterations:   workIters,
-				Index:        idx,
+				Index:        workerIndex,
 				Count:        int32(totalWorkers),
 				NodeID:       nodeID,
 				EnvelopeYAML: envYAML,
@@ -402,6 +432,43 @@ func enqueueAlloc(alloc schedule.Allocation, workIters int64, totalWorkers int, 
 		}
 	}
 	return out
+}
+
+func openCLIndices(nodes []graph.NodeEntry) map[string][]int {
+	indices := make(map[string][]int)
+	for _, node := range nodes {
+		if node.Profile == nil {
+			continue
+		}
+		for _, resource := range node.Profile.Resources {
+			if resource.Class != "graphics" || resource.Attrs["compute_backend"] != "opencl" {
+				continue
+			}
+			if index, ok := integerAttr(resource.Attrs["compute_device_index"]); ok && index >= 0 {
+				indices[node.ID] = append(indices[node.ID], index)
+			}
+		}
+	}
+	return indices
+}
+
+func integerAttr(value any) (int, bool) {
+	switch number := value.(type) {
+	case int:
+		return number, true
+	case int32:
+		return int(number), true
+	case int64:
+		return int(number), true
+	case uint32:
+		return int(number), true
+	case uint64:
+		return int(number), true
+	case float64:
+		return int(number), number == float64(int(number))
+	default:
+		return 0, false
+	}
 }
 
 func drainResults(ch chan workResult) {

@@ -1,0 +1,20 @@
+[Unit]
+Description=OMLS local master
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=@OMLS_USER@
+ExecStart=/usr/local/bin/omls master serve --listen 127.0.0.1:7443 --data-dir /var/lib/omls --insecure
+StateDirectory=omls
+StateDirectoryMode=0700
+Restart=on-failure
+RestartSec=5s
+UMask=0077
+NoNewPrivileges=true
+ProtectSystem=strict
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target

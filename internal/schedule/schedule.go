@@ -91,9 +91,14 @@ func Plan(nodes []graph.NodeEntry, req Request, opt Options) (Allocation, []Cand
 
 func capacity(doc *rdl.Document, requires []string) (int, bool) {
 	best := 0
+	parallelDevices := 0
 	matched := false
+	resourceClass := "compute"
+	if hasCaps(requires, []string{"graphics"}) {
+		resourceClass = "graphics"
+	}
 	for _, r := range doc.Resources {
-		if !hasCaps(r.Capabilities, requires) {
+		if r.Class != resourceClass || !hasCaps(r.Capabilities, requires) {
 			continue
 		}
 		matched = true
@@ -106,10 +111,17 @@ func capacity(doc *rdl.Document, requires []string) (int, bool) {
 			} else if v, ok := intAttr(r.Attrs, "cores"); ok && v > 0 {
 				n = v
 			}
+		} else if r.Class == "graphics" {
+			// Each verified accelerator is one independently schedulable device.
+			parallelDevices += n
+			continue
 		}
 		if n > best {
 			best = n
 		}
+	}
+	if parallelDevices > best {
+		best = parallelDevices
 	}
 	return best, matched
 }

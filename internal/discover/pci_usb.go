@@ -6,6 +6,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/Catatonic-Phobos/OMLS/internal/gpu"
 	"github.com/Catatonic-Phobos/OMLS/internal/rdl"
 )
 
@@ -21,6 +22,9 @@ func collectPCI(root string) ([]rdl.Resource, []string) {
 	out := []rdl.Resource{}
 	gpuIdx := 0
 	pciIdx := 0
+	computeDevices, computeErr := gpu.Devices()
+	usedCompute := make(map[int]bool)
+	hasGraphics := false
 	for _, e := range entries {
 		name := e.Name()
 		dev := filepath.Join(base, name)
@@ -52,10 +56,21 @@ func collectPCI(root string) ([]rdl.Resource, []string) {
 		// Display class 0x03xxxx → GPU/graphics via PCI class only (no vendor SDKs).
 		isGPU := isPCIGraphicsClass(classCode)
 		if isGPU {
+			hasGraphics = true
 			caps := []string{"graphics"}
-			// Many GPUs also expose compute; advertise soft capability without claiming CUDA/ROCm.
-			caps = append(caps, "compute")
 			id := "gpu" + strconv.Itoa(gpuIdx)
+			vendorID, _ := strconv.ParseUint(strings.TrimPrefix(strings.ToLower(vendor), "0x"), 16, 32)
+			for _, d := range computeDevices {
+				if !usedCompute[d.Index] && uint64(d.VendorID) == vendorID {
+					caps = append(caps, "compute", "parallelizable")
+					attrs["compute_backend"] = "opencl"
+					attrs["compute_device_index"] = d.Index
+					attrs["compute_device_name"] = d.Name
+					attrs["compute_units"] = d.ComputeUnit
+					usedCompute[d.Index] = true
+					break
+				}
+			}
 			gpuIdx++
 			out = append(out, rdl.Resource{
 				ID:           id,
@@ -79,6 +94,13 @@ func collectPCI(root string) ([]rdl.Resource, []string) {
 	}
 	if len(out) == 0 {
 		warns = append(warns, "PCI bus empty or inaccessible")
+	}
+	if hasGraphics && len(computeDevices) == 0 {
+		if computeErr != nil {
+			warns = append(warns, "GPU compute unavailable: "+computeErr.Error())
+		} else {
+			warns = append(warns, "GPU display devices found, but no OpenCL GPU compute devices are available")
+		}
 	}
 	return out, warns
 }

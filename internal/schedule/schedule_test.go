@@ -58,6 +58,33 @@ func TestPlanRequiresCapabilities(t *testing.T) {
 	}
 }
 
+func TestPlanCountsVerifiedGPUDevices(t *testing.T) {
+	nodes := []graph.NodeEntry{{
+		ID: "gpu-node", Hostname: "gpu-host", Status: graph.StatusAvailable,
+		Profile: &rdl.Document{Resources: []rdl.Resource{
+			{ID: "gpu0", Class: "graphics", Capabilities: []string{"graphics", "compute", "parallelizable"}, Attrs: map[string]any{"compute_backend": "opencl"}},
+			{ID: "gpu1", Class: "graphics", Capabilities: []string{"graphics", "compute", "parallelizable"}, Attrs: map[string]any{"compute_backend": "opencl"}},
+		}},
+	}}
+	alloc, cands, err := schedule.Plan(nodes, schedule.Request{
+		Function: "gpu_serial", Requires: []string{"graphics", "compute", "parallelizable"}, Workers: 8,
+	}, schedule.Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(cands) != 1 || cands[0].Capacity != 2 {
+		t.Fatalf("candidates=%+v, expected one node with capacity 2", cands)
+	}
+	if alloc["gpu-node"] != 2 {
+		t.Fatalf("allocation=%v, expected GPU workers to clamp to two devices", alloc)
+	}
+	if _, _, err := schedule.Plan(nodes, schedule.Request{
+		Function: "parallel_workers", Requires: []string{"compute", "parallelizable"}, Workers: 1,
+	}, schedule.Options{}); err == nil {
+		t.Fatal("GPU-only node should not be offered as CPU capacity")
+	}
+}
+
 func node(id, host, virt string, cpus int, load float64, tempKnown bool, temp float64) graph.NodeEntry {
 	doc := rdl.Empty()
 	doc.Node = rdl.Node{ID: id, Hostname: host, OS: rdl.OSInfo{Family: "linux"}, Virt: virt}

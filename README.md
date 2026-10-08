@@ -19,9 +19,10 @@ This repository is **independent** of other company stacks.
 | **0.7** | Community hardware profiles + priors | [delivery](docs/layers/0.7-community.md) |
 | **0.8** | Driver sandbox / VFIO-UIO userspace stub | [delivery](docs/layers/0.8-sandbox.md) |
 | **0.9** | Power Fabric / MCU protocol simulator | [delivery](docs/layers/0.9-power.md) |
-| **1.0** (this tree) | Integration milestone — stable adaptive stack | [delivery](docs/layers/1.0-milestone.md) |
+| **1.0** | Integration milestone — stable adaptive stack | [delivery](docs/layers/1.0-milestone.md) |
+| **1.1** (this tree) | Cluster autodiscovery — `omlsd`, LAN membership, elected coordinator | [delivery](docs/layers/1.1-cluster.md) |
 
-No kernel fork. No Popcorn. Userspace on stock Linux only. Version string: **`1.0.0`**.
+No kernel fork. No Popcorn. Userspace on stock Linux only. Version string: **`1.1.0`**.
 
 ## Build
 
@@ -127,6 +128,54 @@ With a master and one or more `omls agent run` processes:
 
 The demo schedules `parallel_workers` across available compute nodes, agents burn CPU for each work unit, and the Learning Plane (EWMA of duration / temp delta) adjusts the next split with printed reasons. Missing thermal signals stay neutral. Rebalancing needs ≥2 available nodes.
 
+### GPU work (serial per agent)
+
+`run-demo --device gpu` schedules work only onto graphics devices that the agent can open through an OpenCL GPU runtime. It sends one work unit per GPU and each agent executes its queue sequentially in discovered GPU order. PCI discovery alone does not make a GPU schedulable. On apt-based systems, OMLS automatically installs `mesa-opencl-icd` when it detects an Intel or AMD GPU without the Mesa runtime, enables the matching Rusticl driver, and repeats discovery. The package manager may request administrator authentication. Verify `compute_backend: opencl` in the profile before starting the demo.
+
+```bash
+./omls agent discover --out machine-profile.yaml
+# the agent also performs GPU runtime setup before registering
+./omls agent run --master 127.0.0.1:7443 --insecure
+./omls master run-demo --master 127.0.0.1:7443 --insecure \
+  --device gpu --workers 2 --iterations 3 --work-iterations 30000000
+```
+
+GPU work is a synthetic OpenCL integer workload. Increase `--work-iterations` for more work per device. Resource Envelopes are not supported in GPU mode yet.
+
+## Cluster (1.1)
+
+One resident process per computer. It discovers hardware, keeps a stable `node_id`, and finds other OMLS nodes on the LAN with mDNS (`_omls._tcp.local`). No master address and no manual join.
+
+```bash
+omls daemon
+# another terminal, same machine or any peer
+omls status
+omls nodes
+omls cluster
+omls graph
+omls run-demo --workers 4 --iterations 2 --policy adaptive
+```
+
+`omls master serve` and `omls agent run --master HOST:PORT` stay available for debugging. Normal use does not need them. The daemon elects a temporary coordinator (lowest ready `node_id`). If that machine disappears, another node takes the role and the existing scheduler sees the nodes that are still up.
+
+Identity is stored in the daemon data directory (`~/.local/share/omls/identity.yaml`, or `/var/lib/omls` for the systemd unit) and is reused after reboot.
+
+### Start OMLS at boot with systemd
+
+The repository currently has no `.deb` installer. For this checkout, the setup script builds OMLS, installs the Intel/AMD Mesa OpenCL runtime if needed, and enables `omls.service` at boot. The unit runs as the invoking user. Package and service installation may request administrator authentication.
+
+```bash
+./scripts/install-systemd-services.sh
+systemctl status omls
+journalctl -u omls -f
+omls status
+omls nodes
+```
+
+The older `omls-master` and `omls-agent` units are disabled by that script so they do not bind the same port. Their unit templates remain for manual lab use.
+
+**Release requirement:** the future compiled `.deb` installer must inspect the systems OMLS detects and automatically install and activate every required supported driver, library, service, and system configuration—not only GPU components. It must also install and enable the OMLS service(s) so they start at boot, while preserving per-machine configuration. See [installation and packaging requirements](docs/installation.md).
+
 ## Resource Envelopes (0.4)
 
 Workloads can declare an ADSR-style **Resource Envelope** instead of only “run at 100%”:
@@ -228,7 +277,7 @@ When `run-demo` is given `--preset` / `--envelope`, the master attaches a soft p
 
 ## 1.0 milestone
 
-`omls version` / fabric Health report `1.0.0`. The supported loop is:
+`omls version` / fabric Health report `1.1.0` on this tree (1.0.0 was the integration milestone). The supported loop is:
 
 ```text
 DISCOVER → DESCRIBE → REGISTER → SCHEDULE → ENVELOPE → OBSERVE → ADJUST

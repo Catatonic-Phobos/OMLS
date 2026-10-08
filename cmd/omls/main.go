@@ -3,6 +3,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"os/signal"
@@ -16,6 +17,7 @@ import (
 	"github.com/Catatonic-Phobos/OMLS/internal/envelope"
 	"github.com/Catatonic-Phobos/OMLS/internal/fabric"
 	"github.com/Catatonic-Phobos/OMLS/internal/fabric/tlsconfig"
+	"github.com/Catatonic-Phobos/OMLS/internal/gpu"
 	"github.com/Catatonic-Phobos/OMLS/internal/graph"
 	"github.com/Catatonic-Phobos/OMLS/internal/power"
 	"github.com/Catatonic-Phobos/OMLS/internal/rdl"
@@ -25,9 +27,14 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-const version = "1.0.0"
+const version = "1.1.0"
 
 func main() {
+	if filepath.Base(os.Args[0]) == "omlsd" {
+		err := runDaemon(os.Args[1:])
+		exitErr(err)
+		return
+	}
 	if len(os.Args) < 2 {
 		usage()
 		os.Exit(2)
@@ -38,6 +45,18 @@ func main() {
 		err = runAgent(os.Args[2:])
 	case "master":
 		err = runMaster(os.Args[2:])
+	case "daemon":
+		err = runDaemon(os.Args[2:])
+	case "status":
+		err = runClusterStatus(os.Args[2:])
+	case "nodes":
+		err = runClusterNodes(os.Args[2:])
+	case "cluster":
+		err = runClusterInfo(os.Args[2:])
+	case "graph":
+		err = runClusterGraph(os.Args[2:])
+	case "run-demo":
+		err = runClusterDemo(os.Args[2:])
 	case "community":
 		err = runCommunity(os.Args[2:])
 	case "power":
@@ -51,10 +70,18 @@ func main() {
 		usage()
 		os.Exit(2)
 	}
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "omls: %v\n", err)
+	exitErr(err)
+}
+
+func exitErr(err error) {
+	if err == nil || errors.Is(err, errHelp) {
+		return
+	}
+	if errors.Is(err, errDaemonStopped) {
 		os.Exit(1)
 	}
+	fmt.Fprintf(os.Stderr, "omls: %v\n", err)
+	os.Exit(1)
 }
 
 func runAgent(args []string) error {
@@ -142,6 +169,9 @@ func runDiscover(args []string) error {
 
 	if format == "" {
 		format = rdl.FormatFromPath(out)
+	}
+	if err := gpu.PrepareOpenCL(); err != nil {
+		return err
 	}
 
 	res, err := discover.Discover(discover.Options{})
@@ -422,6 +452,9 @@ func runAgentLoop(args []string, once bool) error {
 		default:
 			return fmt.Errorf("unknown flag %q", a)
 		}
+	}
+	if err := gpu.PrepareOpenCL(); err != nil {
+		return err
 	}
 
 	creds, err := tlsF.clientCreds()
@@ -758,10 +791,19 @@ func runMasterDemo(args []string) error {
 	iterations := int32(3)
 	workIters := int64(3_000_000)
 	policy := "ewma"
+	device := "cpu"
 	var envFile, envPreset string
 	for i := 0; i < len(rest); i++ {
 		a := rest[i]
 		switch {
+		case a == "--device":
+			i++
+			if i >= len(rest) {
+				return fmt.Errorf("--device requires cpu|gpu")
+			}
+			device = strings.ToLower(rest[i])
+		case strings.HasPrefix(a, "--device="):
+			device = strings.ToLower(strings.TrimPrefix(a, "--device="))
 		case a == "--policy":
 			i++
 			if i >= len(rest) {
@@ -851,6 +893,12 @@ func runMasterDemo(args []string) error {
 			return fmt.Errorf("unknown flag %q", a)
 		}
 	}
+	if device != "cpu" && device != "gpu" {
+		return fmt.Errorf("--device must be cpu or gpu")
+	}
+	if device == "gpu" && (envFile != "" || envPreset != "") {
+		return fmt.Errorf("GPU mode does not support --preset or --envelope yet")
+	}
 	var envYAML []byte
 	switch {
 	case envFile != "":
@@ -884,15 +932,19 @@ func runMasterDemo(args []string) error {
 	}
 	defer conn.Close()
 
-	fmt.Fprintf(os.Stderr, "omls master run-demo: workers=%d iterations=%d work_iterations=%d envelope=%v policy=%s\n",
-		workers, iterations, workIters, envFile != "" || envPreset != "", policy)
+	rpcPolicy := policy
+	if device == "gpu" {
+		rpcPolicy = "gpu-serial:" + policy
+	}
+	fmt.Fprintf(os.Stderr, "omls master run-demo: device=%s workers=%d iterations=%d work_iterations=%d envelope=%v policy=%s\n",
+		device, workers, iterations, workIters, envFile != "" || envPreset != "", policy)
 	resp, err := client.RunDemo(ctx, &omlsv1.RunDemoRequest{
 		Workers:        workers,
 		Iterations:     iterations,
 		WorkIterations: workIters,
 		TimeoutMs:      180_000,
 		EnvelopeYaml:   envYAML,
-		Policy:         policy,
+		Policy:         rpcPolicy,
 	})
 	if err != nil {
 		return err
@@ -1498,6 +1550,12 @@ func usage() {
 	fmt.Print(`omls — Operational Machine Learning System
 
 Usage:
+  omls daemon [--data-dir PATH] [--listen :7443]
+  omls status
+  omls nodes
+  omls cluster
+  omls graph [--out graph.yaml]
+  omls run-demo [--workers 8] [--policy adaptive]
   omls agent discover [--out machine-profile.yaml] [--format yaml|json] [--sandbox]
   omls agent run --master HOST:PORT [--ca --cert --key | --insecure]
   omls agent register --master HOST:PORT [...]
@@ -1512,9 +1570,11 @@ Usage:
   omls power show|hello|budget
   omls version
 
-OMLS 1.0: Stable adaptive distributed resource stack (discover→fabric→schedule→learn).
+OMLS 1.1: nodes discover each other and form a cluster. master/agent remain for debug.
 `)
 }
+
+var errDaemonStopped = errors.New("daemon stopped")
 
 func agentUsage() string {
 	return `omls agent — local node agent
@@ -1621,12 +1681,15 @@ func masterDemoUsage() string {
 
 Usage:
   omls master run-demo --master HOST:PORT [--workers 8] [--iterations 3] [--work-iterations N]
-       [--preset eco|--envelope FILE] [--policy ewma|adaptive] (--ca --cert --key | --insecure)
+       [--device cpu|gpu] [--preset eco|--envelope FILE] [--policy ewma|adaptive] (--ca --cert --key | --insecure)
 
 Agents must be running (` + "`omls agent run`" + `) so they can claim and execute work units.
 Optional --preset/--envelope attaches a Resource Envelope to each work unit (0.4).
 --policy ewma (default): 0.3 thermal + duration EWMA rules.
 --policy adaptive (0.6): multi-signal blend + hysteresis/cooldown; explainable score notes.
+--device gpu schedules one work unit per OpenCL GPU and executes them serially per agent.
+GPU mode requires a working OpenCL GPU runtime on the agent; envelopes are not supported yet.
+Increase --work-iterations to increase compute work per GPU.
 With one node the demo still runs; rebalancing needs ≥2 available nodes.
 `
 }

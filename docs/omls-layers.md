@@ -3,6 +3,8 @@
 `main` is always the **cumulative functional stack**. Each version below is a **layer**: additive capability with a clear ownership boundary. Layers can be revisited or swapped later without rewriting the whole system.
 
 ```text
+1.1 Cluster autodiscovery (omlsd, mDNS, elected coordinator)
+  ↑
 1.0 Integration milestone (stable surface)
   ↑
 0.9 Physical Power Fabric / MCU stub
@@ -42,6 +44,7 @@ Policy: land each layer on `main` so the tree stays runnable; keep a PR (or comm
 | **0.8** | Driver sandbox stub | `internal/sandbox`, RDL `sandbox` class, `omls agent sandbox probe\|list\|claim` | [note](layers/0.8-sandbox.md) |
 | **0.9** | Power fabric simulator | `internal/power`, `omls power`, RunDemo envelope→budget | [note](layers/0.9-power.md) |
 | **1.0** | Integration milestone | version `1.0.0`, `TestStackSmoke1_0`, stable product surface | [note](layers/1.0-milestone.md) |
+| **1.1** | Home cluster bootstrap | `internal/cluster`, `omls daemon`, `omls status\|nodes\|cluster\|graph`, mDNS `_omls._tcp`, elected coordinator over the existing fabric | [note](layers/1.1-cluster.md) |
 
 ---
 

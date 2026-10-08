@@ -1,0 +1,19 @@
+[Unit]
+Description=OMLS local hardware agent
+Requires=omls-master.service
+After=omls-master.service network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=@OMLS_USER@
+ExecStart=/usr/local/bin/omls agent run --master 127.0.0.1:7443 --insecure
+Restart=on-failure
+RestartSec=10s
+UMask=0077
+NoNewPrivileges=true
+ProtectSystem=strict
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target

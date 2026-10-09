@@ -35,11 +35,11 @@ If the binary is older than the `update` command, install once from git (`./scri
 ./scripts/pack-release.sh
 # dist/omls-linux-amd64.tar.gz
 
-git tag -a v1.2.0 -m "OMLS 1.2.0"
-git push origin v1.2.0
-gh release create v1.2.0 dist/omls-linux-amd64.tar.gz \
-  --title "OMLS 1.2.0" \
-  --notes "Honest membership + exclusive function placement (linux/amd64)."
+git tag -a v1.3.0 -m "OMLS 1.3.0"
+git push origin v1.3.0
+gh release create v1.3.0 dist/omls-linux-amd64.tar.gz \
+  --title "OMLS 1.3.0" \
+  --notes "RAM reservation and live status. Does not install an older release over a newer local build."
 ```
 
 Or upload onto an existing tag:

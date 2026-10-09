@@ -62,6 +62,7 @@ type Result struct {
 	AssetName   string
 	DownloadURL string
 	UpToDate    bool
+	Ahead       bool // local build is newer than the published release
 	Installed   bool
 }
 
@@ -78,7 +79,54 @@ func NormalizeVersion(v string) string {
 
 // VersionsEqual compares release tags / version strings without a leading v.
 func VersionsEqual(a, b string) bool {
-	return NormalizeVersion(a) == NormalizeVersion(b)
+	return CompareVersions(a, b) == 0
+}
+
+// CompareVersions returns -1 when a is older than b, 0 when equal, and 1 when a is newer.
+// Missing numeric parts count as zero. A leading v is ignored.
+func CompareVersions(a, b string) int {
+	as := versionParts(a)
+	bs := versionParts(b)
+	n := len(as)
+	if len(bs) > n {
+		n = len(bs)
+	}
+	for i := 0; i < n; i++ {
+		av, bv := 0, 0
+		if i < len(as) {
+			av = as[i]
+		}
+		if i < len(bs) {
+			bv = bs[i]
+		}
+		if av < bv {
+			return -1
+		}
+		if av > bv {
+			return 1
+		}
+	}
+	return 0
+}
+
+func versionParts(v string) []int {
+	v = NormalizeVersion(v)
+	if v == "" {
+		return nil
+	}
+	chunks := strings.Split(v, ".")
+	out := make([]int, 0, len(chunks))
+	for _, c := range chunks {
+		n := 0
+		for _, r := range c {
+			if r < '0' || r > '9' {
+				break
+			}
+			n = n*10 + int(r-'0')
+		}
+		out = append(out, n)
+	}
+	return out
 }
 
 // SelectAsset finds the pack asset for goos/arch on a release.
@@ -196,13 +244,15 @@ func Plan(o Options) (Result, error) {
 	}
 	cur := NormalizeVersion(o.CurrentVersion)
 	latest := NormalizeVersion(rel.TagName)
+	cmp := CompareVersions(cur, latest)
 	res := Result{
 		Current:     cur,
 		LatestTag:   rel.TagName,
 		LatestVer:   latest,
 		AssetName:   asset.Name,
 		DownloadURL: asset.BrowserDownloadURL,
-		UpToDate:    VersionsEqual(cur, latest) && !o.Force,
+		UpToDate:    cmp == 0 && !o.Force,
+		Ahead:       cmp > 0 && !o.Force,
 	}
 	return res, nil
 }
@@ -214,6 +264,10 @@ func Run(o Options) (Result, error) {
 		return Result{}, err
 	}
 	fmt.Fprintf(o.stdout(), "current=%s latest=%s asset=%s\n", res.Current, res.LatestTag, res.AssetName)
+	if res.Ahead {
+		fmt.Fprintf(o.stdout(), "local %s is newer than published release %s\n", res.Current, res.LatestTag)
+		return res, nil
+	}
 	if res.UpToDate {
 		fmt.Fprintln(o.stdout(), "already up to date")
 		return res, nil

@@ -121,6 +121,48 @@ func TestPlanAndRunCheckOnly(t *testing.T) {
 	}
 }
 
+func TestNewerLocalBuildIsNotDowngraded(t *testing.T) {
+	if update.CompareVersions("1.3.0", "1.2.0") <= 0 {
+		t.Fatal("1.3.0 should be newer than 1.2.0")
+	}
+	if update.CompareVersions("v1.2.0", "1.2.0") != 0 {
+		t.Fatal("v prefix should not change equality")
+	}
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_ = json.NewEncoder(w).Encode(update.Release{
+			TagName: "v1.2.0",
+			Assets: []update.Asset{{
+				Name:               "omls-linux-amd64.tar.gz",
+				BrowserDownloadURL: "https://example.invalid/pack",
+			}},
+		})
+	}))
+	defer srv.Close()
+	var out bytes.Buffer
+	installed := false
+	res, err := update.Run(update.Options{
+		CurrentVersion: "1.3.0",
+		OS:             "linux",
+		Arch:           "amd64",
+		APIBase:        srv.URL,
+		HTTPClient:     srv.Client(),
+		Stdout:         &out,
+		InstallFunc: func(string) error {
+			installed = true
+			return nil
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !res.Ahead || res.Installed || installed {
+		t.Fatalf("res=%+v installed=%v out=%s", res, installed, out.String())
+	}
+	if !strings.Contains(out.String(), "newer than published release") {
+		t.Fatalf("out=%s", out.String())
+	}
+}
+
 func TestDownloadExtractAndInstall(t *testing.T) {
 	packBytes := buildTestPack(t)
 	var srvURL string

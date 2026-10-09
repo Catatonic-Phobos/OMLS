@@ -27,7 +27,7 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-const version = "1.3.0"
+const version = "1.3.1"
 
 func main() {
 	if filepath.Base(os.Args[0]) == "omlsd" {
@@ -1578,7 +1578,7 @@ Usage:
   omls cache status
   omls version
 
-OMLS 1.3: a node can reserve RAM and hold a slice of memory or graphics for a peer.
+OMLS 1.3.1: a node can reserve RAM on a peer, and new work stays off a machine once its CPU reaches 80%.
 `)
 }
 

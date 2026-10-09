@@ -7,6 +7,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/Catatonic-Phobos/OMLS/internal/cache"
 	"github.com/Catatonic-Phobos/OMLS/internal/community"
 	"github.com/Catatonic-Phobos/OMLS/internal/discover"
 	"github.com/Catatonic-Phobos/OMLS/internal/fabric"
@@ -26,6 +27,7 @@ type Config struct {
 	AdvertiseHost    string
 	NodeID           string
 	Directory        Directory
+	CacheListen      string
 }
 
 // Daemon is one resident OMLS node: discovery, membership, and a temporary
@@ -148,6 +150,18 @@ func (d *Daemon) run(ctx context.Context) error {
 	apiErr := make(chan error, 1)
 	go func() {
 		apiErr <- d.serveAPI(ctx)
+	}()
+	go func() {
+		addr := d.cfg.CacheListen
+		if addr == "" {
+			addr = cache.DefaultListen
+		}
+		if addr == "-" {
+			return
+		}
+		if err := cache.Serve(ctx, addr, cache.NewStore()); err != nil && ctx.Err() == nil {
+			fmt.Fprintf(os.Stderr, "omlsd: ram cache: %v\n", err)
+		}
 	}()
 
 	events, err := d.dir.Watch(ctx)

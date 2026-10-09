@@ -21,9 +21,10 @@ This repository is **independent** of other company stacks.
 | **0.9** | Power Fabric / MCU protocol simulator | [delivery](docs/layers/0.9-power.md) |
 | **1.0** | Integration milestone — stable adaptive stack | [delivery](docs/layers/1.0-milestone.md) |
 | **1.1** | Cluster autodiscovery — `omlsd`, LAN membership, elected coordinator | [delivery](docs/layers/1.1-cluster.md) |
-| **1.2** (this tree) | Honest membership + exclusive function placement across joined nodes | [delivery](docs/layers/1.2-honest-placement.md) |
+| **1.2** | Honest membership + exclusive function placement across joined nodes | [delivery](docs/layers/1.2-honest-placement.md) |
+| **1.3** (this tree) | RAM reservation — a peer holds a memory or graphics slice | [delivery](docs/layers/1.3-cache.md) |
 
-No kernel fork. No Popcorn. Userspace on stock Linux only. Version string: **`1.2.0`**.
+No kernel fork. No Popcorn. Userspace on stock Linux only. Version string: **`1.3.0`**.
 
 ## Build
 
@@ -288,7 +289,7 @@ When `run-demo` is given `--preset` / `--envelope`, the master attaches a soft p
 
 ## 1.0 milestone
 
-`omls version` / fabric Health report `1.2.0` on this tree (1.0.0 was the integration milestone). The supported loop is:
+`omls version` / fabric Health report `1.3.0` on this tree (1.0.0 was the integration milestone). The supported loop is:
 
 ```text
 DISCOVER → DESCRIBE → REGISTER → SCHEDULE → ENVELOPE → OBSERVE → ADJUST

@@ -27,7 +27,7 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-const version = "1.2.0"
+const version = "1.3.0"
 
 func main() {
 	if filepath.Base(os.Args[0]) == "omlsd" {
@@ -63,6 +63,8 @@ func main() {
 		err = runPower(os.Args[2:])
 	case "update":
 		err = runUpdate(os.Args[2:])
+	case "cache":
+		err = runCache(os.Args[2:])
 	case "version", "--version", "-V":
 		fmt.Printf("omls %s\n", version)
 	case "help", "-h", "--help":
@@ -1553,7 +1555,7 @@ func usage() {
 
 Usage:
   omls daemon [--data-dir PATH] [--listen :7443]
-  omls status
+  omls status [--once]
   omls nodes
   omls cluster
   omls graph [--out graph.yaml]
@@ -1571,9 +1573,12 @@ Usage:
   omls community list|show|import [--dir DIR]
   omls power show|hello|budget
   omls update [--check] [--force]
+  omls cache serve [--listen :7444]
+  omls cache place [--node NAME] [--bytes 512MB] [--fill 32MB] [--kind memory|graphics]
+  omls cache status
   omls version
 
-OMLS 1.1: nodes discover each other and form a cluster. master/agent remain for debug.
+OMLS 1.3: a node can reserve RAM and hold a slice of memory or graphics for a peer.
 `)
 }
 

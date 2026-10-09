@@ -119,6 +119,7 @@ func startNode(t *testing.T, bus *MemoryDirectory, id, listen string) (func(), s
 			NodeID:           id,
 			Directory:        bus,
 			CommunityDir:     t.TempDir(),
+			CacheListen:      "-",
 		})
 	}()
 	var once sync.Once

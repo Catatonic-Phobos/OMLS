@@ -96,20 +96,53 @@ func runDaemon(args []string) error {
 }
 
 func runClusterStatus(args []string) error {
-	if helpRequested(args) {
+	once := false
+	rest := make([]string, 0, len(args))
+	for _, a := range args {
+		if a == "--once" {
+			once = true
+			continue
+		}
+		rest = append(rest, a)
+	}
+	if helpRequested(rest) {
 		fmt.Print(clusterStatusUsage())
 		return nil
 	}
-	sock, err := parseSocketArgs(args)
+	sock, err := parseSocketArgs(rest)
 	if err != nil {
 		return daemonClientErr(err)
 	}
-	var st cluster.Status
-	if err := cluster.GetJSON(context.Background(), sock, "/v1/status", &st); err != nil {
-		return daemonClientErr(err)
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+	if !once && isTerminal(os.Stdout.Fd()) {
+		fmt.Print("\033[?25l")
+		defer fmt.Print("\033[?25h")
 	}
-	fmt.Print(cluster.FormatStatus(st))
-	return nil
+	var prevCPU cpuCounters
+	var haveCPU bool
+	tick := time.NewTicker(time.Second)
+	defer tick.Stop()
+	for {
+		frame, cpu, ok := collectStatus(ctx, sock, prevCPU, haveCPU)
+		if ok {
+			prevCPU = cpu
+			haveCPU = true
+		}
+		if !once && isTerminal(os.Stdout.Fd()) {
+			fmt.Print("\033[H\033[2J")
+		}
+		fmt.Print(cluster.FormatLive(frame))
+		if once || !isTerminal(os.Stdout.Fd()) {
+			return nil
+		}
+		select {
+		case <-ctx.Done():
+			fmt.Println()
+			return nil
+		case <-tick.C:
+		}
+	}
 }
 
 func runClusterNodes(args []string) error {
@@ -440,10 +473,14 @@ omlsd is the same binary: install it as the daemon name if you prefer.
 }
 
 func clusterStatusUsage() string {
-	return `omls status — local cluster summary
+	return `omls status — live cluster usage
 
 Usage:
-  omls status [--socket PATH]
+  omls status [--socket PATH] [--once]
+
+Refreshes every second until Ctrl+C. Shows each node's CPU, RAM, disk,
+GPU, and RAM reservation, plus how that usage is split across the nodes.
+--once prints a single frame.
 `
 }
 

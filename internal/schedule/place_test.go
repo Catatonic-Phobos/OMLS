@@ -37,6 +37,28 @@ func TestPlaceExclusiveSeparatesFunctions(t *testing.T) {
 	}
 }
 
+func TestPlaceExclusiveKeepsWorkOffSaturatedNode(t *testing.T) {
+	nodes := []graph.NodeEntry{
+		node("busy", "host-a", "bare", 4, 3.6, false, 0),
+		node("free", "host-b", "bare", 4, 0.4, false, 0),
+	}
+	placements, err := schedule.PlaceExclusive(nodes, []schedule.FuncRequest{
+		{Function: "parallel_workers", Workers: 2},
+		{Function: "memory_touch", Workers: 2},
+	}, schedule.Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(placements) != 2 {
+		t.Fatalf("placements=%d", len(placements))
+	}
+	for _, p := range placements {
+		if p.NodeID != "free" {
+			t.Fatalf("function %s landed on %s, want free: %+v", p.Function, p.NodeID, placements)
+		}
+	}
+}
+
 func TestPlaceExclusiveReusesWhenOnlyOneNode(t *testing.T) {
 	nodes := []graph.NodeEntry{
 		node("solo", "host", "bare", 8, 0.1, false, 0),

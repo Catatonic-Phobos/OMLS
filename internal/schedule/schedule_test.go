@@ -47,6 +47,37 @@ func TestPlanThermalCeilingPenalizes(t *testing.T) {
 	}
 }
 
+func TestPlanSkipsNodeAtCPUCeiling(t *testing.T) {
+	nodes := []graph.NodeEntry{
+		node("busy", "a", "bare", 4, 3.2, false, 0),
+		node("free", "b", "bare", 4, 0.4, false, 0),
+	}
+	alloc, cands, err := schedule.Plan(nodes, schedule.Request{Workers: 4}, schedule.Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(cands) != 2 {
+		t.Fatalf("cands=%d", len(cands))
+	}
+	if alloc["busy"] != 0 || alloc["free"] != 4 {
+		t.Fatalf("expected all workers on the node under 80%%: %v", alloc)
+	}
+}
+
+func TestPlanUsesSaturatedNodesWhenEveryNodeIsAtCeiling(t *testing.T) {
+	nodes := []graph.NodeEntry{
+		node("a", "a", "bare", 4, 3.6, false, 0),
+		node("b", "b", "bare", 4, 3.6, false, 0),
+	}
+	alloc, _, err := schedule.Plan(nodes, schedule.Request{Workers: 4}, schedule.Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if alloc["a"]+alloc["b"] != 4 {
+		t.Fatalf("work should still run when every node is at the ceiling: %v", alloc)
+	}
+}
+
 func TestPlanRequiresCapabilities(t *testing.T) {
 	n := node("x", "h", "bare", 4, 0, false, 0)
 	n.Profile.Resources = []rdl.Resource{{

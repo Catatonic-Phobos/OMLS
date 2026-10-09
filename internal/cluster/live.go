@@ -117,11 +117,56 @@ func formatSplit(nodes []LiveNode) string {
 		fmt.Fprintf(&b, "%-12s %7s %7s %10s\n", trunc(name, 12), cpuShare, ramShare, resShare)
 	}
 	if reserved == 0 {
-		fmt.Fprintf(&b, "reserve: none\n\n")
+		fmt.Fprintf(&b, "reserve: none\n")
 	} else {
-		fmt.Fprintf(&b, "reserve: %s across %d nodes\n\n", sizeOrDash(reserved), len(nodes))
+		fmt.Fprintf(&b, "reserve: %s across %d nodes\n", sizeOrDash(reserved), len(nodes))
 	}
+	b.WriteString(formatSpill(nodes))
 	return b.String()
+}
+
+// formatSpill says where the next task goes once a node reaches the CPU ceiling.
+// SPLIT above is the share of CPU and RAM already in use on each machine.
+func formatSpill(nodes []LiveNode) string {
+	const ceiling = 80.0
+	type openNode struct {
+		name string
+		cpu  float64
+	}
+	var hot []string
+	var open []openNode
+	known := 0
+	for _, n := range nodes {
+		if !n.CPUKnown {
+			continue
+		}
+		known++
+		name := n.Name
+		if name == "" {
+			name = "-"
+		}
+		if n.CPU >= ceiling {
+			hot = append(hot, name)
+			continue
+		}
+		open = append(open, openNode{name: name, cpu: n.CPU})
+	}
+	if known == 0 {
+		return "ceiling: 80%   spill: unknown\n\n"
+	}
+	if len(hot) == 0 {
+		return "ceiling: 80%   spill: idle\n\n"
+	}
+	if len(open) == 0 {
+		return "ceiling: 80%   spill: saturated\n\n"
+	}
+	best := open[0]
+	for _, n := range open[1:] {
+		if n.cpu < best.cpu {
+			best = n
+		}
+	}
+	return fmt.Sprintf("ceiling: 80%%   spill: %s → %s\n\n", strings.Join(hot, ","), best.name)
 }
 
 // UsageFromGraph fills CPU, RAM, temperature, and logical CPUs from a graph node.

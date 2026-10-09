@@ -52,14 +52,16 @@ func PlaceExclusive(nodes []graph.NodeEntry, funcs []FuncRequest, opt Options) (
 			fn.Requires = []string{"compute", "parallelizable"}
 		}
 		type scored struct {
-			n      graph.NodeEntry
-			cap    int
-			score  float64
-			reason string
+			n         graph.NodeEntry
+			cap       int
+			score     float64
+			reason    string
+			saturated bool
+			used      bool
 		}
 		var cands []scored
 		for _, n := range nodes {
-			if n.Status != graph.StatusAvailable || n.Profile == nil || used[n.ID] {
+			if n.Status != graph.StatusAvailable || n.Profile == nil {
 				continue
 			}
 			cap, ok := capacity(n.Profile, fn.Requires)
@@ -67,26 +69,25 @@ func PlaceExclusive(nodes []graph.NodeEntry, funcs []FuncRequest, opt Options) (
 				continue
 			}
 			score, reason := scoreNode(n, cap, opt)
-			cands = append(cands, scored{n: n, cap: cap, score: score, reason: reason})
-		}
-		if len(cands) == 0 {
-			// Fall back: allow reuse only when every unused node lacks the capability.
-			for _, n := range nodes {
-				if n.Status != graph.StatusAvailable || n.Profile == nil {
-					continue
-				}
-				cap, ok := capacity(n.Profile, fn.Requires)
-				if !ok || cap < 1 {
-					continue
-				}
-				score, reason := scoreNode(n, cap, opt)
-				cands = append(cands, scored{n: n, cap: cap, score: score, reason: reason + " reuse=forced"})
+			pct, known := cpuPercent(n, cap)
+			sat := known && pct >= opt.cpuCeiling()
+			reason += cpuSpillReason(pct, known, opt.cpuCeiling(), sat)
+			reused := used[n.ID]
+			if reused {
+				reason += " reuse=forced"
 			}
+			cands = append(cands, scored{
+				n: n, cap: cap, score: score, reason: reason, saturated: sat, used: reused,
+			})
 		}
 		if len(cands) == 0 {
 			return nil, fmt.Errorf("no available node for function %q requiring %v", fn.Function, fn.Requires)
 		}
 		sort.SliceStable(cands, func(i, j int) bool {
+			ri, rj := spillRank(cands[i].used, cands[i].saturated), spillRank(cands[j].used, cands[j].saturated)
+			if ri != rj {
+				return ri < rj
+			}
 			if cands[i].score == cands[j].score {
 				return cands[i].n.ID < cands[j].n.ID
 			}
@@ -109,4 +110,21 @@ func PlaceExclusive(nodes []graph.NodeEntry, funcs []FuncRequest, opt Options) (
 		})
 	}
 	return out, nil
+}
+
+// spillRank prefers a free node under the CPU ceiling. A node already used
+// for another function still beats a saturated peer, so work moves off the
+// machine that hit the ceiling. Saturated nodes are used only when every
+// peer is also at the ceiling.
+func spillRank(used, saturated bool) int {
+	switch {
+	case !used && !saturated:
+		return 0
+	case used && !saturated:
+		return 1
+	case !used && saturated:
+		return 2
+	default:
+		return 3
+	}
 }

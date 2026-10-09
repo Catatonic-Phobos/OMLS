@@ -49,7 +49,7 @@ func TestFormatLiveSplit(t *testing.T) {
 			{Name: "omls", CPU: 25, CPUKnown: true, BusyCores: 0.5, RAM: 13, RAMKnown: true, RAMUsed: 250, Reserved: 512 << 20, Filled: 32 << 20, Temp: 30, TempKnown: true},
 		},
 	})
-	for _, want := range []string{"OMLS: running", "Mintboy", "omls", "SPLIT", "512 MiB", "32 MiB", "100%", "reserve:"} {
+	for _, want := range []string{"OMLS: running", "Mintboy", "omls", "SPLIT", "512 MiB", "32 MiB", "100%", "reserve:", "ceiling: 80%", "spill: Mintboy → omls"} {
 		if !strings.Contains(text, want) {
 			t.Fatalf("missing %q in\n%s", want, text)
 		}

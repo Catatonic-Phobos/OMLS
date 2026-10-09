@@ -20,21 +20,27 @@ type Request struct {
 
 // Candidate is a scored available node.
 type Candidate struct {
-	NodeID   string
-	Hostname string
-	Virt     string
-	Capacity int // max workers (logical CPUs)
-	Score    float64
-	Reason   string
+	NodeID    string
+	Hostname  string
+	Virt      string
+	Capacity  int // max workers (logical CPUs)
+	Score     float64
+	Reason    string
+	Saturated bool // CPU at or above the ceiling; skipped while a peer has room
 }
 
 // Allocation maps node ID → worker count.
 type Allocation map[string]int
 
+// DefaultCPUCeiling is the CPU percent at which a node stops receiving new work
+// while another node still has room.
+const DefaultCPUCeiling = 80
+
 // Options tunes scheduler v0.
 type Options struct {
 	LocalHostname  string  // master's hostname; matching agents get a locality bonus
 	ThermalCeiling float64 // Celsius; 0 → 85
+	CPUCeiling     float64 // percent of logical CPUs; 0 → DefaultCPUCeiling
 	WSLPenalty     float64 // subtracted from score; default 2
 }
 
@@ -66,13 +72,17 @@ func Plan(nodes []graph.NodeEntry, req Request, opt Options) (Allocation, []Cand
 			continue
 		}
 		score, reason := scoreNode(n, cap, opt)
+		pct, known := cpuPercent(n, cap)
+		sat := known && pct >= opt.cpuCeiling()
+		reason += cpuSpillReason(pct, known, opt.cpuCeiling(), sat)
 		cands = append(cands, Candidate{
-			NodeID:   n.ID,
-			Hostname: n.Hostname,
-			Virt:     n.Virt,
-			Capacity: cap,
-			Score:    score,
-			Reason:   reason,
+			NodeID:    n.ID,
+			Hostname:  n.Hostname,
+			Virt:      n.Virt,
+			Capacity:  cap,
+			Score:     score,
+			Reason:    reason,
+			Saturated: sat,
 		})
 	}
 	if len(cands) == 0 {
@@ -85,8 +95,48 @@ func Plan(nodes []graph.NodeEntry, req Request, opt Options) (Allocation, []Cand
 		return cands[i].Score > cands[j].Score
 	})
 
-	alloc := splitWorkers(cands, req.Workers)
+	alloc := splitWorkers(openCandidates(cands), req.Workers)
 	return alloc, cands, nil
+}
+
+func (opt Options) cpuCeiling() float64 {
+	if opt.CPUCeiling <= 0 {
+		return DefaultCPUCeiling
+	}
+	return opt.CPUCeiling
+}
+
+func cpuPercent(n graph.NodeEntry, cap int) (float64, bool) {
+	if n.Telemetry == nil || cap < 1 {
+		return 0, false
+	}
+	return n.Telemetry.CPULoad / float64(cap) * 100, true
+}
+
+func cpuSpillReason(pct float64, known bool, ceiling float64, saturated bool) string {
+	if !known {
+		return " cpu=unknown spill=open"
+	}
+	state := "open"
+	if saturated {
+		state = "saturated"
+	}
+	return fmt.Sprintf(" cpu=%.0f%% ceiling=%.0f spill=%s", pct, ceiling, state)
+}
+
+// openCandidates keeps nodes under the CPU ceiling. When every node is at the
+// ceiling, the original list is returned so work still runs.
+func openCandidates(cands []Candidate) []Candidate {
+	open := make([]Candidate, 0, len(cands))
+	for _, c := range cands {
+		if !c.Saturated {
+			open = append(open, c)
+		}
+	}
+	if len(open) == 0 {
+		return cands
+	}
+	return open
 }
 
 func capacity(doc *rdl.Document, requires []string) (int, bool) {

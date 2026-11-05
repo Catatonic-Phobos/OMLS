@@ -6,7 +6,7 @@ This repository is **independent** of other company stacks.
 
 ## Status
 
-`main` is always the **cumulative functional stack**. Versions are additive **layers** — see [`docs/omls-layers.md`](docs/omls-layers.md).
+`main` is the **cumulative functional stack**. The `1.0` release was an integration milestone, not the end of the project: later `1.x` releases added LAN cluster operation, peer reservations, persistent shared storage, task-result caching, and an experimental remote graphics path. See [`docs/omls-layers.md`](docs/omls-layers.md) for the layer map.
 
 | Version | Scope | Layer note |
 |---|---|---|
@@ -19,35 +19,45 @@ This repository is **independent** of other company stacks.
 | **0.7** | Community hardware profiles + priors | [delivery](docs/layers/0.7-community.md) |
 | **0.8** | Driver sandbox / VFIO-UIO userspace stub | [delivery](docs/layers/0.8-sandbox.md) |
 | **0.9** | Power Fabric / MCU protocol simulator | [delivery](docs/layers/0.9-power.md) |
-| **1.0** | Integration milestone — stable adaptive stack | [delivery](docs/layers/1.0-milestone.md) |
+| **1.0** | Released integration milestone — stable adaptive stack | [delivery](docs/layers/1.0-milestone.md) |
 | **1.1** | Cluster autodiscovery — `omlsd`, LAN membership, elected coordinator | [delivery](docs/layers/1.1-cluster.md) |
 | **1.2** | Honest membership + exclusive function placement across joined nodes | [delivery](docs/layers/1.2-honest-placement.md) |
-| **1.3** | RAM reservation — a peer holds a memory or graphics slice | [delivery](docs/layers/1.3-cache.md) |
-| **1.4** (this tree) | Experimental pressure-triggered peer reservations and shared result cache | [delivery](docs/layers/1.4-borrow.md) |
+| **1.3** | Peer cache reservations for memory or graphics data | [delivery](docs/layers/1.3-cache.md) |
+| **1.4** | Experimental pressure-triggered peer reservation bookkeeping | [delivery](docs/layers/1.4-borrow.md) |
+| **1.4.1** (current release) | Persistent file/task caches, SSH/SMB profiles, and experimental remote Vulkan buffer execution | [release](https://github.com/Catatonic-Phobos/OMLS/releases/tag/v1.4.1) · [storage](docs/shared-storage.md) · [task cache](docs/sharing-lifecycle.md) · [renderer](docs/remote-renderer.md) |
 
-No kernel fork. No Popcorn. Userspace on stock Linux only. Version string: **`1.4.1`**.
+No kernel fork. No Popcorn. Userspace on stock Linux only. Current version: **`1.4.1`**.
+
+## What works in 1.4.1
+
+- **LAN cluster:** `omls daemon` discovers peers over mDNS, tracks membership,
+  elects a temporary coordinator, and reports per-node CPU, RAM, disk, and GPU
+  memory occupancy where available. The GPU value is memory usage, not GPU
+  compute utilization or per-process attribution. Membership and placement
+  status distinguish joined nodes from devices that were merely discovered.
+- **Pressure reservations:** at 80% CPU, RAM, or GPU-memory pressure, OMLS can
+  place a small named reservation on a peer and release it below 70%. The
+  current 1.4 borrow payload is synthetic bookkeeping; it does **not** move
+  application textures, shaders, live RAM, VRAM, or running work to another
+  machine.
+- **Shared files:** `omls storage init|login|check|put|get` transfers actual
+  files over SSH or SMB. SSH profiles use a persistent key; the private
+  connection file is mode `0600`. Transfers verify SHA-256 and the local cache
+  reuses content by hash. This does not redirect an application's file reads.
+- **Reusable task results:** `omls sharing` stores content-addressed results
+  under `~/OMLS/sharing`, with manifests, atomic publication, recovery, active
+  task leases, TTL/LRU cleanup, and authenticated SSH peer dispatch. A later
+  compatible request can reuse a verified cached result.
+- **Experimental remote Vulkan buffers:** `omls render` can open a multiplexed
+  SSH session to a remote Gfxstream executor. A private Mesa ICD on the client
+  has been used to enumerate the peer GPU and submit explicit noncoherent buffer
+  uploads, copies, and readbacks. Window presentation, coherent-memory
+  emulation, broad extension compatibility, and game integration are incomplete.
+  This is not yet general GPU sharing or remote rendering for The Sims.
+
+See [remote renderer](docs/remote-renderer.md) and [guest setup](render/mesa-guest/README.md) for the experimental graphics build and its limits. Audio routing and clock configuration are outside this renderer path.
 
 ## Build
-
-The experimental graphics path is available through `omls render
-probe|channel|session --node STUDIO`. A private Mesa ICD on the notebook can
-enumerate the remote GTX 1050 and perform explicit noncoherent buffer uploads,
-GPU copies and readbacks over one multiplexed SSH session. Window presentation,
-coherent-memory emulation and game compatibility remain unsupported. See
-[remote renderer](docs/remote-renderer.md) and [guest setup](render/mesa-guest/README.md).
-
-Persistent task results now have a separate lifecycle under `~/OMLS/sharing`:
-`omls sharing init|run|dispatch|get|put|gc|status|maintain`. Task specifications
-identify compatible work, content hashes identify complete output, and active
-leases protect data from cleanup. See [sharing lifecycle](docs/sharing-lifecycle.md)
-for policy, authenticated peer execution, tests, and the remaining Sims renderer
-integration boundary.
-
-Authenticated real-file sharing is available with `omls storage
-init|login|check|put|get`. Private connection profiles support SSH keys or SMB
-credentials; downloads report integrity and cache reuse. See
-[shared storage](docs/shared-storage.md). This does not yet redirect Sims reads
-or distribute its rendering across machines.
 
 Requires Go 1.22+.
 
@@ -308,9 +318,12 @@ In-process MCU simulator with rails and soft budgets (no physical hardware):
 
 When `run-demo` is given `--preset` / `--envelope`, the master attaches a soft power budget derived from envelope intensity and mentions it in the policy note.
 
-## 1.0 milestone
+## Historical integration milestone (1.0)
 
-`omls version` / fabric Health report `1.4.1` on this tree (1.0.0 was the integration milestone). The supported loop is:
+The released `1.0.0` milestone integrated the userspace discovery, fabric,
+scheduler, envelopes, behavior profiles, community priors, sandbox probe, and
+power-budget simulator. Versions `1.1` through `1.4.1` build on that milestone;
+they did not replace or cancel it. The supported loop is:
 
 ```text
 DISCOVER → DESCRIBE → REGISTER → SCHEDULE → ENVELOPE → OBSERVE → ADJUST
@@ -336,7 +349,7 @@ See [`schemas/rdl-v0.schema.json`](schemas/rdl-v0.schema.json) and [`docs/omls-p
 
 ## Docs
 
-- [`docs/omls-layers.md`](docs/omls-layers.md) — operational layer hierarchy (0.1→1.0)
+- [`docs/omls-layers.md`](docs/omls-layers.md) — operational layer hierarchy (0.1→1.4.1)
 - [`docs/layers/`](docs/layers/) — per-layer delivery notes
 - [`docs/omls-vision.md`](docs/omls-vision.md) — full architecture vision
 - [`docs/omls-plan-0.1-0.3.md`](docs/omls-plan-0.1-0.3.md) — implementation plan for 0.1–0.3

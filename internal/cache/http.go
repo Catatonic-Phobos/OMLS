@@ -8,6 +8,7 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"net/url"
 	"strconv"
 	"time"
 )
@@ -30,12 +31,19 @@ func Serve(ctx context.Context, addr string, st *Store) error {
 			Bytes  int    `json:"bytes"`
 			Kind   string `json:"kind"`
 			Source string `json:"source"`
+			Name   string `json:"name"`
 		}
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 			http.Error(w, err.Error(), http.StatusBadRequest)
 			return
 		}
-		stat, err := st.Reserve(req.Bytes, req.Kind, req.Source)
+		var stat Stat
+		var err error
+		if req.Name == "" {
+			stat, err = st.Reserve(req.Bytes, req.Kind, req.Source)
+		} else {
+			stat, err = st.ReserveNamed(req.Name, req.Bytes, req.Kind, req.Source)
+		}
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusBadRequest)
 			return
@@ -58,8 +66,19 @@ func Serve(ctx context.Context, addr string, st *Store) error {
 			http.Error(w, err.Error(), http.StatusBadRequest)
 			return
 		}
-		if err := st.WriteAt(offset, buf); err != nil {
-			http.Error(w, err.Error(), http.StatusBadRequest)
+		name := r.URL.Query().Get("name")
+		var werr error
+		if name == "" {
+			werr = st.WriteAt(offset, buf)
+		} else {
+			werr = st.WriteNamed(name, offset, buf)
+		}
+		if werr != nil {
+			http.Error(w, werr.Error(), http.StatusBadRequest)
+			return
+		}
+		if name != "" {
+			writeJSON(w, st.StatNamed(name))
 			return
 		}
 		writeJSON(w, st.Stat())
@@ -71,7 +90,14 @@ func Serve(ctx context.Context, addr string, st *Store) error {
 			http.Error(w, "offset and length are required", http.StatusBadRequest)
 			return
 		}
-		buf, err := st.ReadAt(offset, length)
+		name := r.URL.Query().Get("name")
+		var buf []byte
+		var err error
+		if name == "" {
+			buf, err = st.ReadAt(offset, length)
+		} else {
+			buf, err = st.ReadNamed(name, offset, length)
+		}
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusBadRequest)
 			return
@@ -79,12 +105,23 @@ func Serve(ctx context.Context, addr string, st *Store) error {
 		w.Header().Set("Content-Type", "application/octet-stream")
 		_, _ = w.Write(buf)
 	})
-	mux.HandleFunc("/v1/stat", func(w http.ResponseWriter, _ *http.Request) {
+	mux.HandleFunc("/v1/stat", func(w http.ResponseWriter, r *http.Request) {
+		if name := r.URL.Query().Get("name"); name != "" {
+			writeJSON(w, st.StatNamed(name))
+			return
+		}
 		writeJSON(w, st.Stat())
+	})
+	mux.HandleFunc("/v1/offer", func(w http.ResponseWriter, _ *http.Request) {
+		writeJSON(w, SampleHeadroom())
 	})
 	mux.HandleFunc("/v1/release", func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
 			http.Error(w, "POST required", http.StatusMethodNotAllowed)
+			return
+		}
+		if name := r.URL.Query().Get("name"); name != "" {
+			writeJSON(w, st.ReleaseNamed(name))
 			return
 		}
 		writeJSON(w, st.Release())
@@ -110,14 +147,37 @@ func Serve(ctx context.Context, addr string, st *Store) error {
 
 // Place reserves capacity on addr and copies slice.Data into it, then reads it back.
 func Place(ctx context.Context, addr string, capacity int, sl Slice) (Stat, error) {
+	return place(ctx, addr, "", capacity, sl)
+}
+
+// PlaceNamed reserves a named slice so a second function on the same peer stays intact.
+func PlaceNamed(ctx context.Context, addr, name string, capacity int, sl Slice) (Stat, error) {
+	if name == "" {
+		return Stat{}, fmt.Errorf("name is required")
+	}
+	return place(ctx, addr, name, capacity, sl)
+}
+
+// ReleaseNamed drops one named slice. A missing name is an empty stat.
+func ReleaseNamed(ctx context.Context, addr, name string) (Stat, error) {
+	var st Stat
+	err := postJSON(ctx, addr, "/v1/release?name="+url.QueryEscape(name), map[string]any{}, &st)
+	return st, err
+}
+
+func place(ctx context.Context, addr, name string, capacity int, sl Slice) (Stat, error) {
 	if len(sl.Data) > capacity {
 		return Stat{}, fmt.Errorf("slice %d is larger than reservation %d", len(sl.Data), capacity)
 	}
-	if err := postJSON(ctx, addr, "/v1/reserve", map[string]any{
+	body := map[string]any{
 		"bytes":  capacity,
 		"kind":   sl.Kind,
 		"source": sl.Source,
-	}, nil); err != nil {
+	}
+	if name != "" {
+		body["name"] = name
+	}
+	if err := postJSON(ctx, addr, "/v1/reserve", body, nil); err != nil {
 		return Stat{}, err
 	}
 	for off := 0; off < len(sl.Data); {
@@ -125,7 +185,11 @@ func Place(ctx context.Context, addr string, capacity int, sl Slice) (Stat, erro
 		if end > len(sl.Data) {
 			end = len(sl.Data)
 		}
-		if err := postRaw(ctx, addr, fmt.Sprintf("/v1/write?offset=%d", off), sl.Data[off:end]); err != nil {
+		path := fmt.Sprintf("/v1/write?offset=%d", off)
+		if name != "" {
+			path += "&name=" + url.QueryEscape(name)
+		}
+		if err := postRaw(ctx, addr, path, sl.Data[off:end]); err != nil {
 			return Stat{}, err
 		}
 		off = end
@@ -136,7 +200,11 @@ func Place(ctx context.Context, addr string, capacity int, sl Slice) (Stat, erro
 		if end > len(sl.Data) {
 			end = len(sl.Data)
 		}
-		part, err := getRaw(ctx, addr, fmt.Sprintf("/v1/read?offset=%d&length=%d", off, end-off))
+		path := fmt.Sprintf("/v1/read?offset=%d&length=%d", off, end-off)
+		if name != "" {
+			path += "&name=" + url.QueryEscape(name)
+		}
+		part, err := getRaw(ctx, addr, path)
 		if err != nil {
 			return Stat{}, err
 		}
@@ -146,8 +214,12 @@ func Place(ctx context.Context, addr string, capacity int, sl Slice) (Stat, erro
 	if !bytes.Equal(got, sl.Data) {
 		return Stat{}, fmt.Errorf("remote reservation does not match the local slice")
 	}
+	statPath := "/v1/stat"
+	if name != "" {
+		statPath += "?name=" + url.QueryEscape(name)
+	}
 	var st Stat
-	if err := getJSON(ctx, addr, "/v1/stat", &st); err != nil {
+	if err := getJSON(ctx, addr, statPath, &st); err != nil {
 		return Stat{}, err
 	}
 	return st, nil
@@ -158,6 +230,13 @@ func FetchStat(ctx context.Context, addr string) (Stat, error) {
 	var st Stat
 	err := getJSON(ctx, addr, "/v1/stat", &st)
 	return st, err
+}
+
+// FetchHeadroom reads the peer's own CPU, RAM, and VRAM offer.
+func FetchHeadroom(ctx context.Context, addr string) (Headroom, error) {
+	var h Headroom
+	err := getJSON(ctx, addr, "/v1/offer", &h)
+	return h, err
 }
 
 func postJSON(ctx context.Context, addr, path string, payload any, dest any) error {

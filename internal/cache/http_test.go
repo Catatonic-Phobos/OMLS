@@ -43,6 +43,22 @@ func TestPlaceRoundTrip(t *testing.T) {
 	if st.Capacity != 16384 || st.Used != len(payload) || st.Kind != KindMemory || st.Source != "unit" {
 		t.Fatalf("stat %+v", st)
 	}
+	named, err := PlaceNamed(context.Background(), addr, "studio/texture", 128, Slice{
+		Kind: KindMemory, Source: "borrow:texture", Data: []byte("texture-bytes"),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if named.Capacity != 128 || named.Used != len("texture-bytes") || named.Source != "borrow:texture" {
+		t.Fatalf("named %+v", named)
+	}
+	again, err := FetchStat(context.Background(), addr)
+	if err != nil || again.Source != "unit" || again.Capacity != 16384 {
+		t.Fatalf("legacy after named place %+v %v", again, err)
+	}
+	if _, err := ReleaseNamed(context.Background(), addr, "studio/texture"); err != nil {
+		t.Fatal(err)
+	}
 	cancel()
 	select {
 	case <-errCh:

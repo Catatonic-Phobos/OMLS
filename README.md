@@ -22,11 +22,32 @@ This repository is **independent** of other company stacks.
 | **1.0** | Integration milestone — stable adaptive stack | [delivery](docs/layers/1.0-milestone.md) |
 | **1.1** | Cluster autodiscovery — `omlsd`, LAN membership, elected coordinator | [delivery](docs/layers/1.1-cluster.md) |
 | **1.2** | Honest membership + exclusive function placement across joined nodes | [delivery](docs/layers/1.2-honest-placement.md) |
-| **1.3** (this tree) | RAM reservation — a peer holds a memory or graphics slice | [delivery](docs/layers/1.3-cache.md) |
+| **1.3** | RAM reservation — a peer holds a memory or graphics slice | [delivery](docs/layers/1.3-cache.md) |
+| **1.4** (this tree) | Experimental pressure-triggered peer reservations and shared result cache | [delivery](docs/layers/1.4-borrow.md) |
 
-No kernel fork. No Popcorn. Userspace on stock Linux only. Version string: **`1.3.1`**.
+No kernel fork. No Popcorn. Userspace on stock Linux only. Version string: **`1.4.1`**.
 
 ## Build
+
+The experimental graphics path is available through `omls render
+probe|channel|session --node STUDIO`. A private Mesa ICD on the notebook can
+enumerate the remote GTX 1050 and perform explicit noncoherent buffer uploads,
+GPU copies and readbacks over one multiplexed SSH session. Window presentation,
+coherent-memory emulation and game compatibility remain unsupported. See
+[remote renderer](docs/remote-renderer.md) and [guest setup](render/mesa-guest/README.md).
+
+Persistent task results now have a separate lifecycle under `~/OMLS/sharing`:
+`omls sharing init|run|dispatch|get|put|gc|status|maintain`. Task specifications
+identify compatible work, content hashes identify complete output, and active
+leases protect data from cleanup. See [sharing lifecycle](docs/sharing-lifecycle.md)
+for policy, authenticated peer execution, tests, and the remaining Sims renderer
+integration boundary.
+
+Authenticated real-file sharing is available with `omls storage
+init|login|check|put|get`. Private connection profiles support SSH keys or SMB
+credentials; downloads report integrity and cache reuse. See
+[shared storage](docs/shared-storage.md). This does not yet redirect Sims reads
+or distribute its rendering across machines.
 
 Requires Go 1.22+.
 
@@ -289,7 +310,7 @@ When `run-demo` is given `--preset` / `--envelope`, the master attaches a soft p
 
 ## 1.0 milestone
 
-`omls version` / fabric Health report `1.3.1` on this tree (1.0.0 was the integration milestone). The supported loop is:
+`omls version` / fabric Health report `1.4.1` on this tree (1.0.0 was the integration milestone). The supported loop is:
 
 ```text
 DISCOVER → DESCRIBE → REGISTER → SCHEDULE → ENVELOPE → OBSERVE → ADJUST

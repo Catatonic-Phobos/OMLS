@@ -44,12 +44,13 @@ func TestFormatLiveSplit(t *testing.T) {
 		Running:     true,
 		Cluster:     "active",
 		Coordinator: "omls",
+		Self:        "Mintboy",
 		Nodes: []LiveNode{
 			{Name: "Mintboy", CPU: 80, CPUKnown: true, BusyCores: 3.2, RAM: 50, RAMKnown: true, RAMUsed: 5000, Disk: 42, DiskKnown: true, GPU: 21, GPUKnown: true, Temp: 58, TempKnown: true},
 			{Name: "omls", CPU: 25, CPUKnown: true, BusyCores: 0.5, RAM: 13, RAMKnown: true, RAMUsed: 250, Reserved: 512 << 20, Filled: 32 << 20, Temp: 30, TempKnown: true},
 		},
 	})
-	for _, want := range []string{"OMLS: running", "Mintboy", "omls", "SPLIT", "512 MiB", "32 MiB", "100%", "reserve:", "ceiling: 80%", "spill: Mintboy → omls"} {
+	for _, want := range []string{"OMLS: running", "Mintboy", "omls", "SPLIT", "512 MiB", "32 MiB", "100%", "reserve:", "ceiling: 80%", "spill: Mintboy → omls", "borrow: texture → omls", "shader idle"} {
 		if !strings.Contains(text, want) {
 			t.Fatalf("missing %q in\n%s", want, text)
 		}

@@ -5,6 +5,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/Catatonic-Phobos/OMLS/internal/borrow"
 	"github.com/Catatonic-Phobos/OMLS/internal/graph"
 )
 
@@ -19,6 +20,9 @@ type LiveNode struct {
 	RAM       float64
 	RAMKnown  bool
 	RAMUsed   int64
+	RAMFree   int64
+	VRAMFree  int64
+	VRAMKnown bool
 	Disk      float64
 	DiskKnown bool
 	GPU       float64
@@ -35,6 +39,7 @@ type LiveView struct {
 	Running     bool
 	Cluster     string
 	Coordinator string
+	Self        string
 	Nodes       []LiveNode
 }
 
@@ -79,8 +84,39 @@ func FormatLive(v LiveView) string {
 	}
 	b.WriteString("\n")
 	b.WriteString(formatSplit(v.Nodes))
+	self, peers := borrowOffers(v)
+	b.WriteString(borrow.Format(borrow.Decide(self, peers)))
 	b.WriteString("refresh 1s    Ctrl+C to stop\n")
 	return b.String()
+}
+
+func borrowOffers(v LiveView) (borrow.Offer, []borrow.Offer) {
+	var self borrow.Offer
+	var peers []borrow.Offer
+	for _, n := range v.Nodes {
+		o := borrow.Offer{
+			Name:      n.Name,
+			Addr:      n.Name,
+			CPU:       n.CPU,
+			CPUKnown:  n.CPUKnown,
+			RAM:       n.RAM,
+			RAMKnown:  n.RAMKnown,
+			RAMFree:   n.RAMFree,
+			GPU:       n.GPU,
+			GPUKnown:  n.GPUKnown,
+			VRAMFree:  n.VRAMFree,
+			VRAMKnown: n.VRAMKnown,
+		}
+		if v.Self != "" && strings.EqualFold(n.Name, v.Self) {
+			self = o
+			continue
+		}
+		peers = append(peers, o)
+	}
+	if self.Name == "" {
+		self.Name = v.Self
+	}
+	return self, peers
 }
 
 func formatSplit(nodes []LiveNode) string {
@@ -189,6 +225,7 @@ func UsageFromGraph(n graph.NodeEntry) LiveNode {
 			used = 0
 		}
 		out.RAMUsed = used
+		out.RAMFree = tel.MemAvailableBytes
 		out.RAM = float64(used) / float64(tel.MemTotalBytes) * 100
 		out.RAMKnown = true
 	}

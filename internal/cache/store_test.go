@@ -34,6 +34,40 @@ func TestReserveWriteRead(t *testing.T) {
 	}
 }
 
+func TestNamedSlotKeepsLegacyReservation(t *testing.T) {
+	s := NewStore()
+	if _, err := s.Reserve(64, KindMemory, "legacy"); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.WriteAt(0, []byte("legacy")); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.ReserveNamed("studio/texture", 32, KindMemory, "borrow:texture"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.ReserveNamed("studio/shader", 32, KindGraphics, "borrow:shader"); err != nil {
+		t.Fatal(err)
+	}
+	got, err := s.ReadAt(0, 6)
+	if err != nil || string(got) != "legacy" {
+		t.Fatalf("legacy %q %v", got, err)
+	}
+	if s.Stat().Capacity != 64 {
+		t.Fatalf("legacy stat %+v", s.Stat())
+	}
+	tex := s.StatNamed("studio/texture")
+	if tex.Capacity != 32 || tex.Kind != KindMemory {
+		t.Fatalf("texture %+v", tex)
+	}
+	s.ReleaseNamed("studio/texture")
+	if s.StatNamed("studio/shader").Capacity != 32 {
+		t.Fatal("shader slot was dropped with the texture")
+	}
+	if s.Stat().Used != 6 {
+		t.Fatalf("legacy used %d", s.Stat().Used)
+	}
+}
+
 func TestReserveRejectsUnknownKind(t *testing.T) {
 	s := NewStore()
 	if _, err := s.Reserve(32, "disk", ""); err == nil {

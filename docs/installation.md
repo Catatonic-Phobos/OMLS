@@ -2,10 +2,10 @@
 
 ## Install from a git checkout
 
-Work in **one** directory (example: `/home/phobos/OMLS`). Do not nest another clone inside it.
+Work in **one** directory (example: `$HOME/OMLS`). Do not nest another clone inside it.
 
 ```bash
-cd /home/phobos/OMLS
+cd "$HOME/OMLS"
 git fetch origin
 git reset --hard origin/main
 ./scripts/install.sh
@@ -35,11 +35,11 @@ If the binary is older than the `update` command, install once from git (`./scri
 ./scripts/pack-release.sh
 # dist/omls-linux-amd64.tar.gz
 
-git tag -a v1.3.1 -m "OMLS 1.3.1"
-git push origin v1.3.1
-gh release create v1.3.1 dist/omls-linux-amd64.tar.gz \
-  --title "OMLS 1.3.1" \
-  --notes "CPU ceiling: new work moves to the other node once a machine reaches 80%."
+git tag -a v1.4.1 -m "OMLS 1.4.1"
+git push origin v1.4.1
+gh release create v1.4.1 dist/omls-linux-amd64.tar.gz \
+  --title "OMLS 1.4.1" \
+  --notes "Shared task/result cache, authenticated peer storage, and experimental remote Vulkan buffer execution. Application rendering and workload offload remain incomplete."
 ```
 
 Or upload onto an existing tag:

@@ -3,6 +3,8 @@
 `main` is always the **cumulative functional stack**. Each version below is a **layer**: additive capability with a clear ownership boundary. Layers can be revisited or swapped later without rewriting the whole system.
 
 ```text
+1.4 Peer borrow — texture RAM and shader VRAM move at the 80% ceiling
+  ↑
 1.3 RAM cache reservation (memory or graphics slice on a peer)
   ↑
 1.2 Honest membership + exclusive function placement
@@ -51,6 +53,7 @@ Policy: land each layer on `main` so the tree stays runnable; keep a PR (or comm
 | **1.1** | Home cluster bootstrap | `internal/cluster`, `omls daemon`, `omls status\|nodes\|cluster\|graph`, mDNS `_omls._tcp`, elected coordinator over the existing fabric | [note](layers/1.1-cluster.md) |
 | **1.2** | Honest join + place functions | `schedule.PlaceExclusive`, fabric `executed`/`place` policy, `joined` vs `discovered` status | [note](layers/1.2-honest-placement.md) |
 | **1.3** | RAM reservation on a peer | `internal/cache`, `omls cache serve\|place\|status`, daemon listen `:7444` | [note](layers/1.3-cache.md) |
+| **1.4** | Peer borrow at the ceiling | `internal/borrow`, cache `/v1/offer`, `omls borrow`, daemon loop | [note](layers/1.4-borrow.md) |
 
 ---
 
@@ -65,3 +68,4 @@ Policy: land each layer on `main` so the tree stays runnable; keep a PR (or comm
 7. Sandbox (0.8) never loads kernel modules or binds devices; missing VFIO/UIO is a warning, not a failure.
 8. Power fabric (0.9) is simulated software budgets only — no physical MCU control.
 9. 1.0 freezes the userspace loop as the supported product surface; Language Plane / real MCU / migration remain future/research.
+10. Borrow (1.4) dials a peer's cache directly. It does not ask the elected coordinator to approve the placement.

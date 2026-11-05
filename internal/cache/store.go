@@ -47,12 +47,21 @@ type Store struct {
 	source   string
 	locked   bool
 	hostname string
+	slots    map[string]*slot
+}
+
+type slot struct {
+	buf    []byte
+	used   int
+	kind   string
+	source string
+	locked bool
 }
 
 // NewStore starts with no reservation.
 func NewStore() *Store {
 	host, _ := os.Hostname()
-	return &Store{hostname: host}
+	return &Store{hostname: host, slots: map[string]*slot{}}
 }
 
 // Reserve replaces any previous reservation with n bytes of RAM.
@@ -68,9 +77,8 @@ func (s *Store) Reserve(n int, kind, source string) (Stat, error) {
 	if n > MaxReserve {
 		return Stat{}, fmt.Errorf("reservation %d exceeds max %d", n, MaxReserve)
 	}
-	avail := memAvailable()
-	if avail > 0 && int64(n) > avail/2 {
-		return Stat{}, fmt.Errorf("reservation %d exceeds half of available RAM (%d)", n, avail)
+	if err := s.checkRoom("", n); err != nil {
+		return Stat{}, err
 	}
 	buf := make([]byte, n)
 	locked := unix.Mlock(buf) == nil
@@ -154,6 +162,138 @@ func (s *Store) statLocked() Stat {
 		Source:   s.source,
 		Hostname: s.hostname,
 	}
+}
+
+// ReserveNamed holds one named slice alongside the legacy reservation.
+// A second call with the same name replaces that slice. The name is the
+// requester plus the function, so two machines do not overwrite each other.
+func (s *Store) ReserveNamed(name string, n int, kind, source string) (Stat, error) {
+	if name == "" {
+		return s.Reserve(n, kind, source)
+	}
+	if kind != KindMemory && kind != KindGraphics {
+		return Stat{}, fmt.Errorf("kind must be %s or %s", KindMemory, KindGraphics)
+	}
+	if n < 1 {
+		return Stat{}, fmt.Errorf("reservation must be at least 1 byte")
+	}
+	if n > MaxReserve {
+		return Stat{}, fmt.Errorf("reservation %d exceeds max %d", n, MaxReserve)
+	}
+	if err := s.checkRoom(name, n); err != nil {
+		return Stat{}, err
+	}
+	buf := make([]byte, n)
+	locked := unix.Mlock(buf) == nil
+	s.mu.Lock()
+	if s.slots == nil {
+		s.slots = map[string]*slot{}
+	}
+	prev := s.slots[name]
+	s.slots[name] = &slot{buf: buf, kind: kind, source: source, locked: locked}
+	st := s.slotStatLocked(name)
+	s.mu.Unlock()
+	if prev != nil && len(prev.buf) > 0 {
+		_ = unix.Munlock(prev.buf)
+	}
+	return st, nil
+}
+
+// WriteNamed copies p into the named reservation at offset.
+func (s *Store) WriteNamed(name string, offset int, p []byte) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	sl := s.slots[name]
+	if sl == nil || sl.buf == nil {
+		return fmt.Errorf("no reservation")
+	}
+	if offset < 0 || offset+len(p) > len(sl.buf) {
+		return fmt.Errorf("write [%d,%d) outside reservation of %d", offset, offset+len(p), len(sl.buf))
+	}
+	copy(sl.buf[offset:], p)
+	if end := offset + len(p); end > sl.used {
+		sl.used = end
+	}
+	return nil
+}
+
+// ReadNamed returns length bytes at offset from the named reservation.
+func (s *Store) ReadNamed(name string, offset, length int) ([]byte, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	sl := s.slots[name]
+	if sl == nil || sl.buf == nil {
+		return nil, fmt.Errorf("no reservation")
+	}
+	if offset < 0 || length < 0 || offset+length > len(sl.buf) {
+		return nil, fmt.Errorf("read [%d,%d) outside reservation of %d", offset, offset+length, len(sl.buf))
+	}
+	out := make([]byte, length)
+	copy(out, sl.buf[offset:offset+length])
+	return out, nil
+}
+
+// StatNamed returns one named reservation. An unknown name is an empty stat.
+func (s *Store) StatNamed(name string) Stat {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.slotStatLocked(name)
+}
+
+// ReleaseNamed drops one named reservation.
+func (s *Store) ReleaseNamed(name string) Stat {
+	s.mu.Lock()
+	prev := s.slots[name]
+	delete(s.slots, name)
+	st := s.slotStatLocked(name)
+	s.mu.Unlock()
+	if prev != nil && len(prev.buf) > 0 {
+		_ = unix.Munlock(prev.buf)
+	}
+	return st
+}
+
+func (s *Store) slotStatLocked(name string) Stat {
+	sl := s.slots[name]
+	if sl == nil {
+		return Stat{Hostname: s.hostname}
+	}
+	return Stat{
+		Kind:     sl.kind,
+		Capacity: len(sl.buf),
+		Used:     sl.used,
+		Locked:   sl.locked && len(sl.buf) > 0,
+		Source:   sl.source,
+		Hostname: s.hostname,
+	}
+}
+
+func (s *Store) checkRoom(replacing string, n int) error {
+	avail := memAvailable()
+	if avail <= 0 {
+		return nil
+	}
+	s.mu.Lock()
+	used := s.occupiedLocked(replacing)
+	s.mu.Unlock()
+	if int64(used+n) > avail/2 {
+		return fmt.Errorf("reservation %d exceeds half of available RAM (%d)", used+n, avail)
+	}
+	return nil
+}
+
+func (s *Store) occupiedLocked(replacing string) int {
+	n := 0
+	if replacing != "" {
+		n += len(s.buf)
+	}
+	for name, sl := range s.slots {
+		if name == replacing || sl == nil {
+			continue
+		}
+		n += len(sl.buf)
+	}
+	return n
 }
 
 func memAvailable() int64 {

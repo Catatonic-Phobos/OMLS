@@ -182,6 +182,7 @@ func (d *Daemon) run(ctx context.Context) error {
 	}
 
 	defer d.stopRole()
+	go d.runBorrow(ctx)
 
 	electionReady := d.cfg.Grace <= 0
 	var grace <-chan time.Time

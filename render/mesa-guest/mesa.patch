@@ -1,0 +1,334 @@
+diff --git a/src/gfxstream/codegen/scripts/cereal/encoder.py b/src/gfxstream/codegen/scripts/cereal/encoder.py
+index 3e6135f..b60b428 100644
+--- a/src/gfxstream/codegen/scripts/cereal/encoder.py
++++ b/src/gfxstream/codegen/scripts/cereal/encoder.py
+@@ -586,7 +586,7 @@ def encode_vkFlushMappedMemoryRanges(typeInfo, api, cgen):
+         cgen.stmt("uint64_t streamSize = 0")
+         cgen.stmt("if (!memory) { %s->write(&streamSize, sizeof(uint64_t)); continue; }" % streamVar)
+         cgen.stmt("auto hostPtr = gfxstream_vk_device_memory_get_ptr(memory)")
+-        cgen.stmt("auto actualSize = size == VK_WHOLE_SIZE ? gfxstream_vk_device_memory_get_ptr_size(memory) : size")
++        cgen.stmt("auto actualSize = size == VK_WHOLE_SIZE ? gfxstream_vk_device_memory_get_ptr_size(memory) - offset : size")
+         cgen.stmt("if (!hostPtr) { %s->write(&streamSize, sizeof(uint64_t)); continue; }" % streamVar)
+         cgen.stmt("streamSize = actualSize")
+         cgen.stmt("%s->write(&streamSize, sizeof(uint64_t))" % streamVar)
+@@ -625,7 +625,7 @@ def encode_vkInvalidateMappedMemoryRanges(typeInfo, api, cgen):
+         cgen.stmt("uint64_t streamSize = 0")
+         cgen.stmt("if (!memory) { %s->read(&streamSize, sizeof(uint64_t)); continue; }" % streamVar)
+         cgen.stmt("auto hostPtr = gfxstream_vk_device_memory_get_ptr(memory)")
+-        cgen.stmt("auto actualSize = size == VK_WHOLE_SIZE ? gfxstream_vk_device_memory_get_ptr_size(memory) : size")
++        cgen.stmt("auto actualSize = size == VK_WHOLE_SIZE ? gfxstream_vk_device_memory_get_ptr_size(memory) - offset : size")
+         cgen.stmt("if (!hostPtr) { %s->read(&streamSize, sizeof(uint64_t)); continue; }" % streamVar)
+         cgen.stmt("streamSize = actualSize")
+         cgen.stmt("%s->read(&streamSize, sizeof(uint64_t))" % streamVar)
+diff --git a/src/gfxstream/guest/connection-manager/GfxStreamConnectionManager.cpp b/src/gfxstream/guest/connection-manager/GfxStreamConnectionManager.cpp
+index 37a52ff..71dd08c 100644
+--- a/src/gfxstream/guest/connection-manager/GfxStreamConnectionManager.cpp
++++ b/src/gfxstream/guest/connection-manager/GfxStreamConnectionManager.cpp
+@@ -6,6 +6,7 @@
+ #include "GfxStreamConnectionManager.h"
+ 
+ #include <cerrno>
++#include <cstdlib>
+ 
+ #include "GoldfishAddressSpaceStream.h"
+ #include "QemuPipeStream.h"
+@@ -87,7 +88,15 @@ GfxStreamConnectionManager::GfxStreamConnectionManager(GfxStreamTransportType ty
+                                                        VirtGpuCapset capset)
+     : mTransportType(type), mCapset(capset) {}
+ 
+-GfxStreamConnectionManager::~GfxStreamConnectionManager() {}
++GfxStreamConnectionManager::~GfxStreamConnectionManager() {
++    if (getenv("OMLS_RENDER_SOCKET")) {
++        // Encoders can still flush while destructing, so release them first.
++        // A terminated thread must close its stream instead of exhausting the
++        // shared session's channel budget over the application's lifetime.
++        mConnections.clear();
++        if (mStream) mStream->decRef();
++    }
++}
+ 
+ bool GfxStreamConnectionManager::initialize() {
+     switch (mTransportType) {
+diff --git a/src/gfxstream/guest/connection-manager/QemuPipeStreamStub.cpp b/src/gfxstream/guest/connection-manager/QemuPipeStreamStub.cpp
+index 846cc58..462eb75 100644
+--- a/src/gfxstream/guest/connection-manager/QemuPipeStreamStub.cpp
++++ b/src/gfxstream/guest/connection-manager/QemuPipeStreamStub.cpp
+@@ -1,62 +1,50 @@
+-/*
+- * Copyright 2018 Google LLC
++/* OMLS optional Unix-stream transport for Mesa's desktop Gfxstream client.
+  * SPDX-License-Identifier: MIT
+  */
+-
+ #include "QemuPipeStream.h"
+-
+-QemuPipeStream::QemuPipeStream(size_t bufSize) : IOStream(bufSize) { (void)bufSize; }
+-
+-QemuPipeStream::~QemuPipeStream() {}
+-
+-int QemuPipeStream::connect(const char* serviceName) {
+-    (void)serviceName;
++#include <cerrno>
++#include <climits>
++#include <cstring>
++#include <sys/socket.h>
++#include <sys/un.h>
++#include <unistd.h>
++
++QemuPipeStream::QemuPipeStream(size_t size)
++    : IOStream(size),m_sock(-1),m_bufsize(0),m_buf(nullptr),m_read(0),m_readLeft(0) {}
++QemuPipeStream::~QemuPipeStream(){if(valid()){flush();close(m_sock);}free(m_buf);}
++int QemuPipeStream::connect(const char*){
++    const char* path=getenv("OMLS_RENDER_SOCKET");
++    if(!path||!*path){errno=ENODEV;return -1;}
++    sockaddr_un address{};address.sun_family=AF_UNIX;
++    if(strlen(path)>=sizeof(address.sun_path)){errno=ENAMETOOLONG;return -1;}
++    memcpy(address.sun_path,path,strlen(path)+1);
++    m_sock=socket(AF_UNIX,SOCK_STREAM|SOCK_CLOEXEC,0);
++    if(m_sock<0)return -1;
++    if(::connect(m_sock,reinterpret_cast<sockaddr*>(&address),sizeof(address))<0){close(m_sock);m_sock=-1;return -1;}
+     return 0;
+ }
+-
+-uint64_t QemuPipeStream::processPipeInit() { return 0; }
+-
+-void* QemuPipeStream::allocBuffer(size_t minSize) {
+-    (void)minSize;
+-    return nullptr;
+-};
+-
+-int QemuPipeStream::commitBuffer(size_t size) {
+-    (void)size;
+-    return 0;
++uint64_t QemuPipeStream::processPipeInit(){return 0;}
++void* QemuPipeStream::allocBuffer(size_t size){
++    if(size>m_bufsize){void* next=realloc(m_buf,size);if(!next)return nullptr;m_buf=static_cast<unsigned char*>(next);m_bufsize=size;}
++    return m_buf;
+ }
+-
+-int QemuPipeStream::writeFully(const void* buf, size_t len) {
+-    (void)buf;
+-    (void)len;
+-    return 0;
++int QemuPipeStream::writeFully(const void* input,size_t size){
++    if(!valid())return -1;auto* data=static_cast<const unsigned char*>(input);
++    while(size){const auto n=send(m_sock,data,size,MSG_NOSIGNAL);if(n<0&&errno==EINTR)continue;if(n<=0)return -1;data+=n;size-=n;}return 0;
+ }
+-
+-const unsigned char* QemuPipeStream::readFully(void* buf, size_t len) {
+-    (void)buf;
+-    (void)len;
+-    return nullptr;
++int QemuPipeStream::commitBuffer(size_t size){if(size>m_bufsize)return -1;return writeFully(m_buf,size);}
++const unsigned char* QemuPipeStream::readFully(void* output,size_t size){
++    if(!valid()||(!output&&size))return nullptr;auto* data=static_cast<unsigned char*>(output);
++    size_t done=0;while(done<size){const auto n=::recv(m_sock,data+done,size-done,0);if(n<0&&errno==EINTR)continue;if(n<=0)return nullptr;done+=n;}return data;
+ }
+-
+-const unsigned char* QemuPipeStream::commitBufferAndReadFully(size_t writeSize,
+-                                                              void* userReadBufPtr,
+-                                                              size_t totalReadSize) {
+-    (void)writeSize;
+-    (void)userReadBufPtr;
+-    (void)totalReadSize;
+-    return nullptr;
++const unsigned char* QemuPipeStream::commitBufferAndReadFully(size_t writeSize,void* output,size_t readSize){
++    if(commitBuffer(writeSize)<0)return nullptr;return readFully(output,readSize);
+ }
+-
+-const unsigned char* QemuPipeStream::read(void* buf, size_t* inout_len) {
+-    (void)buf;
+-    (void)inout_len;
+-    return nullptr;
++const unsigned char* QemuPipeStream::read(void* output,size_t* size){
++    if(!size)return nullptr;int n=recv(output,*size);if(n<=0)return nullptr;*size=n;return static_cast<unsigned char*>(output);
+ }
+-
+-bool QemuPipeStream::valid() { return false; }
+-
+-int QemuPipeStream::recv(void* buf, size_t len) {
+-    (void)buf;
+-    (void)len;
+-    return 0;
++bool QemuPipeStream::valid(){return m_sock>=0;}
++int QemuPipeStream::recv(void* output,size_t size){
++    if(!valid()||size>INT_MAX)return -1;
++    ssize_t n;do{n=::recv(m_sock,output,size,0);}while(n<0&&errno==EINTR);return int(n);
+ }
+diff --git a/src/gfxstream/guest/platform/VirtGpu.cpp b/src/gfxstream/guest/platform/VirtGpu.cpp
+index cdb4369..32a3f84 100644
+--- a/src/gfxstream/guest/platform/VirtGpu.cpp
++++ b/src/gfxstream/guest/platform/VirtGpu.cpp
+@@ -39,6 +39,7 @@ VirtGpuDevice* createPlatformVirtGpuDevice(enum VirtGpuCapset capset, int32_t de
+ }
+ 
+ VirtGpuDevice* VirtGpuDevice::getInstance(enum VirtGpuCapset capset, int32_t descriptor) {
++    if (getenv("OMLS_RENDER_SOCKET")) return nullptr;
+     std::lock_guard<std::mutex> lock(sDeviceMutex);
+     // If kCapsetNone is passed, we return a device that was created with any capset.
+     // Otherwise, the created device's capset must match the requested capset.
+diff --git a/src/gfxstream/guest/vulkan/gfxstream_vk_device.cpp b/src/gfxstream/guest/vulkan/gfxstream_vk_device.cpp
+index a15bb7b..921ffe2 100644
+--- a/src/gfxstream/guest/vulkan/gfxstream_vk_device.cpp
++++ b/src/gfxstream/guest/vulkan/gfxstream_vk_device.cpp
+@@ -4,6 +4,7 @@
+  */
+ 
+ #include <atomic>
++#include <cstdlib>
+ #include <errno.h>
+ #include <string.h>
+ 
+@@ -202,6 +203,17 @@ static void get_device_extensions(VkPhysicalDevice physDevInternal,
+             }
+         }
+     }
++    if (getenv("OMLS_RENDER_SOCKET")) {
++        // This first network path has no local window or cross-machine fd
++        // import/export semantics. Do not advertise those inherited features.
++        for (uint32_t i = 0; i < VK_DEVICE_EXTENSION_COUNT; ++i) {
++            const char* name = vk_device_extensions[i].extensionName;
++            if (strstr(name, "external_") || strstr(name, "swapchain") ||
++                strstr(name, "present_") || strstr(name, "display_") ||
++                strstr(name, "image_drm_format_modifier") || strstr(name, "hdr_metadata") ||
++                strstr(name, "queue_family_foreign")) deviceExts->extensions[i] = false;
++        }
++    }
+ }
+ 
+ static VkResult gfxstream_vk_physical_device_init(
+diff --git a/src/gfxstream/guest/vulkan/stubs/GfxStreamRenderControl.cpp b/src/gfxstream/guest/vulkan/stubs/GfxStreamRenderControl.cpp
+index 704e0f3..f02a612 100644
+--- a/src/gfxstream/guest/vulkan/stubs/GfxStreamRenderControl.cpp
++++ b/src/gfxstream/guest/vulkan/stubs/GfxStreamRenderControl.cpp
+@@ -6,8 +6,10 @@
+ #include "GfxStreamRenderControl.h"
+ 
+ #include <cerrno>
++#include <cstdlib>
+ 
+ GfxStreamTransportType renderControlGetTransport() {
++    if (getenv("OMLS_RENDER_SOCKET")) return GFXSTREAM_TRANSPORT_QEMU_PIPE;
+     return GFXSTREAM_TRANSPORT_VIRTIO_GPU_ADDRESS_SPACE;
+ }
+ 
+diff --git a/src/gfxstream/guest/vulkan_enc/ResourceTracker.cpp b/src/gfxstream/guest/vulkan_enc/ResourceTracker.cpp
+index 4671055..cbb842a 100644
+--- a/src/gfxstream/guest/vulkan_enc/ResourceTracker.cpp
++++ b/src/gfxstream/guest/vulkan_enc/ResourceTracker.cpp
+@@ -29,6 +29,9 @@
+ #endif
+ #include <stdint.h>
+ #include <stdlib.h>
++#if DETECT_OS_LINUX
++#include <sys/mman.h>
++#endif
+ 
+ #include <algorithm>
+ #include <chrono>
+@@ -1480,10 +1483,18 @@ bool ResourceTracker::isValidMemoryRange(const VkMappedMemoryRange& range) {
+         return offset <= gfxstream_memory->mapped_size;
+     }
+ 
+-    return offset + size <= gfxstream_memory->mapped_size;
++    return offset <= gfxstream_memory->mapped_size && size <= gfxstream_memory->mapped_size - offset;
+ }
+ 
+ void ResourceTracker::setupCaps(uint32_t& noRenderControlEnc) {
++    if (getenv("OMLS_RENDER_SOCKET")) {
++        // Legacy serialized feature bits match the OMLS host's defaults.
++        // No virtio device, host pointer or exported fd is usable over SSH.
++        mCaps = {};
++        mCaps.vulkanCapset.colorBufferMemoryIndex = 0xFFFFFFFF;
++        noRenderControlEnc = 1;
++        return;
++    }
+     VirtGpuDevice* instance = VirtGpuDevice::getInstance(kCapsetGfxStreamVulkan);
+     if (instance) {
+         mCaps = instance->getCaps();
+@@ -1596,7 +1607,7 @@ void ResourceTracker::setThreadingCallbacks(const ResourceTracker::ThreadingCall
+     ResourceTracker::threadingCallbacks = callbacks;
+ }
+ 
+-bool ResourceTracker::usingDirectMapping() const { return true; }
++bool ResourceTracker::usingDirectMapping() const { return getenv("OMLS_RENDER_SOCKET") == nullptr; }
+ 
+ bool ResourceTracker::supportsGuestCapabilities() const {
+     return mCaps.vulkanCapset.hasGuestCapabilities;
+@@ -1673,12 +1684,14 @@ void ResourceTracker::deviceMemoryTransform_tohost(VkDeviceMemory* memory, uint3
+ 
+             memory[i] = info.coherentMemory->getDeviceMemory();
+ 
++            const VkDeviceSize originalOffset = offset ? offset[i] : 0;
+             if (offset) {
+                 offset[i] = info.coherentMemoryOffset + offset[i];
+             }
+ 
+             if (size && size[i] == VK_WHOLE_SIZE) {
+                 size[i] = gfxstream_memory->mapped_size;
++                if (getenv("OMLS_RENDER_SOCKET")) size[i] -= originalOffset;
+             }
+         }
+     }
+@@ -3214,6 +3227,26 @@ CoherentMemoryPtr ResourceTracker::createCoherentMemory(
+     const VirtGpuResourcePtr& guestBlob, VkEncoder* enc, VkResult& res) {
+     CoherentMemoryPtr coherentMemory = nullptr;
+ 
++#if DETECT_OS_LINUX
++    if (getenv("OMLS_RENDER_SOCKET")) {
++        // This is private staging RAM, never a remotely exported pointer/fd.
++        class OmlsMapping final : public VirtGpuResourceMapping {
++        public:
++            OmlsMapping(void* data, size_t size) : mData(data), mSize(size) {}
++            ~OmlsMapping() override { munmap(mData, mSize); }
++            uint8_t* asRawPtr() override { return static_cast<uint8_t*>(mData); }
++        private:
++            void* mData;
++            size_t mSize;
++        };
++        const size_t size = hostAllocationInfo.allocationSize;
++        void* data = mmap(nullptr, size, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
++        if (data == MAP_FAILED) { res = VK_ERROR_OUT_OF_HOST_MEMORY; return nullptr; }
++        auto mapping = std::make_shared<OmlsMapping>(data, size);
++        return std::make_shared<CoherentMemory>(mapping, size, device, mem);
++    }
++#endif
++
+     if (guestBlob) {
+         auto mapping = guestBlob->createMapping();
+         if (!mapping) {
+@@ -8553,6 +8586,12 @@ const VkPhysicalDeviceMemoryProperties& ResourceTracker::getPhysicalDeviceMemory
+ 
+         VkPhysicalDeviceMemoryProperties properties;
+         enc->vkGetPhysicalDeviceMemoryProperties(physicalDevice, &properties, true /* no lock */);
++        if (getenv("OMLS_RENDER_SOCKET")) {
++            // Network RAM is not coherent with remote GPU memory. Applications
++            // must explicitly flush/invalidate until coherent emulation exists.
++            for (uint32_t i = 0; i < properties.memoryTypeCount; ++i)
++                properties.memoryTypes[i].propertyFlags &= ~VK_MEMORY_PROPERTY_HOST_COHERENT_BIT;
++        }
+         mCachedPhysicalDeviceMemoryProps.emplace(std::move(properties));
+     }
+     return *mCachedPhysicalDeviceMemoryProps;
+diff --git a/src/gfxstream/guest/vulkan_enc/autogenerated/VkEncoder.cpp b/src/gfxstream/guest/vulkan_enc/autogenerated/VkEncoder.cpp
+index 37623c8..c0a14f5 100644
+--- a/src/gfxstream/guest/vulkan_enc/autogenerated/VkEncoder.cpp
++++ b/src/gfxstream/guest/vulkan_enc/autogenerated/VkEncoder.cpp
+@@ -1052,7 +1052,7 @@ VkResult VkEncoder::vkFlushMappedMemoryRanges(VkDevice device, uint32_t memoryRa
+             };
+             auto hostPtr = gfxstream_vk_device_memory_get_ptr(memory);
+             auto actualSize =
+-                size == VK_WHOLE_SIZE ? gfxstream_vk_device_memory_get_ptr_size(memory) : size;
++                size == VK_WHOLE_SIZE ? gfxstream_vk_device_memory_get_ptr_size(memory) - offset : size;
+             if (!hostPtr) {
+                 stream->write(&streamSize, sizeof(uint64_t));
+                 continue;
+@@ -1127,7 +1127,7 @@ VkResult VkEncoder::vkInvalidateMappedMemoryRanges(VkDevice device, uint32_t mem
+             };
+             auto hostPtr = gfxstream_vk_device_memory_get_ptr(memory);
+             auto actualSize =
+-                size == VK_WHOLE_SIZE ? gfxstream_vk_device_memory_get_ptr_size(memory) : size;
++                size == VK_WHOLE_SIZE ? gfxstream_vk_device_memory_get_ptr_size(memory) - offset : size;
+             if (!hostPtr) {
+                 stream->read(&streamSize, sizeof(uint64_t));
+                 continue;

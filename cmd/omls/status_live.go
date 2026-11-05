@@ -42,6 +42,7 @@ func collectStatus(ctx context.Context, sock string, prev cpuCounters, havePrev 
 		}
 	}
 	host, _ := os.Hostname()
+	view.Self = host
 	cur, cpuOK := readCPU()
 	localCPU, localKnown := 0.0, false
 	if cpuOK && havePrev && cur.total > prev.total {
@@ -99,7 +100,61 @@ func collectStatus(ctx context.Context, sock string, prev cpuCounters, havePrev 
 		}
 		view.Nodes = append(view.Nodes, n)
 	}
+	overlayOffers(ctx, members, view.Nodes)
 	return view, cur, cpuOK
+}
+
+func overlayOffers(ctx context.Context, members []cluster.NodeInfo, nodes []cluster.LiveNode) {
+	index := map[string]int{}
+	for i, n := range nodes {
+		index[n.Name] = i
+	}
+	var mu sync.Mutex
+	var wg sync.WaitGroup
+	for _, m := range members {
+		if m.Addr == "" {
+			continue
+		}
+		name := m.Name
+		if name == "" {
+			name = m.NodeID
+		}
+		wg.Add(1)
+		go func(name, addr string) {
+			defer wg.Done()
+			cctx, cancel := context.WithTimeout(ctx, 400*time.Millisecond)
+			defer cancel()
+			h, err := cache.FetchHeadroom(cctx, cache.CachePort(addr))
+			if err != nil {
+				return
+			}
+			mu.Lock()
+			defer mu.Unlock()
+			i, ok := index[name]
+			if !ok {
+				return
+			}
+			n := &nodes[i]
+			if h.CPUKnown {
+				n.CPU = h.CPU
+				n.CPUKnown = true
+			}
+			if h.RAMKnown {
+				n.RAM = h.RAM
+				n.RAMKnown = true
+				n.RAMFree = h.RAMFree
+			}
+			if h.GPUKnown {
+				n.GPU = h.GPU
+				n.GPUKnown = true
+			}
+			if h.VRAMKnown {
+				n.VRAMFree = h.VRAMFree
+				n.VRAMKnown = true
+			}
+		}(name, m.Addr)
+	}
+	wg.Wait()
 }
 
 type cacheHold struct {

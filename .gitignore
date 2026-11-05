@@ -16,6 +16,10 @@ graph.yaml
 
 # Dev mTLS materials
 /dev-certs/
+.env
+.env.*
+!.env.example
+/sharing/
 
 # Go
 vendor/

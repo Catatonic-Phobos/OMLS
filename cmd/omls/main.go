@@ -27,7 +27,7 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-const version = "1.3.1"
+const version = "1.4.1"
 
 func main() {
 	if filepath.Base(os.Args[0]) == "omlsd" {
@@ -65,6 +65,14 @@ func main() {
 		err = runUpdate(os.Args[2:])
 	case "cache":
 		err = runCache(os.Args[2:])
+	case "borrow":
+		err = runBorrow(os.Args[2:])
+	case "storage":
+		err = runStorage(os.Args[2:])
+	case "sharing":
+		err = runSharing(os.Args[2:])
+	case "render":
+		err = runRender(os.Args[2:])
 	case "version", "--version", "-V":
 		fmt.Printf("omls %s\n", version)
 	case "help", "-h", "--help":
@@ -1557,6 +1565,9 @@ Usage:
   omls daemon [--data-dir PATH] [--listen :7443]
   omls status [--once]
   omls nodes
+  omls storage init|login|check|put|get [--node STUDIO]
+  omls sharing init|key|put|get|gc|status [--root PATH]
+  omls render probe|channel|session [--node STUDIO]
   omls cluster
   omls graph [--out graph.yaml]
   omls run-demo [--workers 8] [--policy adaptive]
@@ -1576,9 +1587,10 @@ Usage:
   omls cache serve [--listen :7444]
   omls cache place [--node NAME] [--bytes 512MB] [--fill 32MB] [--kind memory|graphics]
   omls cache status
+  omls borrow [--plan]
   omls version
 
-OMLS 1.3.1: a node can reserve RAM on a peer, and new work stays off a machine once its CPU reaches 80%.
+OMLS 1.4.1: experimental resource reservations and shared task/result caches.
 `)
 }
 

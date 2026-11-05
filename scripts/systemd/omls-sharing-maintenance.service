@@ -1,0 +1,14 @@
+[Unit]
+Description=OMLS persistent task cache maintenance
+
+[Service]
+Type=simple
+ExecStart=%h/OMLS/sharing/runtime/omls sharing maintain --root %h/OMLS/sharing
+Restart=on-failure
+RestartSec=10
+UMask=0077
+Nice=10
+IOSchedulingClass=idle
+
+[Install]
+WantedBy=default.target

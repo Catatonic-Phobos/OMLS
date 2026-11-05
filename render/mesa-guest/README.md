@@ -19,7 +19,7 @@ transfers. It is not ready for games or windowed presentation.
   already-installed runtime. No system package/driver was replaced.
 
 ```
-bash render/mesa-guest/setup.sh /home/phobos/OMLS
+bash render/mesa-guest/setup.sh "$HOME/OMLS"
 ```
 
 The script verifies the source revision, applies the patch only when it is not
